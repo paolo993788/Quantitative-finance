@@ -1,0 +1,68 @@
+# Credentials and personal configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+secrets/
+credentials.json
+.Renviron
+.Renviron.*
+!.Renviron.example
+
+# Personal Claude Code files
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+.claude/projects/
+.claude/sessions/
+
+# Local data: publish only selected examples
+/data/*
+!/data/README.md
+!/data/examples/
+
+# Generated results and working files
+/outputs/*
+!/outputs/README.md
+/work/
+/tmp/
+/logs/
+*.log
+
+# Python and notebooks
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# R
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+renv/library/
+renv/staging/
+
+# JavaScript
+node_modules/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
