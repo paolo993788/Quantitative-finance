@@ -1,6 +1,6 @@
 # Quant engine: C++ pricing and risk engines for Python
 
-A C++17 library exposed to Python with pybind11, used by the notebooks of this repository. It prices European and American options (Black-Scholes closed form, Crank-Nicolson finite differences, Heston Fourier inversion and Quadratic-Exponential Monte Carlo), simulates the profit and loss of discretely delta-hedged option positions under GBM, Heston and GARCH filtered-historical-simulation dynamics, and estimates GARCH-family models for rolling Value at Risk and Expected Shortfall. The Python package adds NumPy/SciPy reference implementations for validation, Heston calibration, VaR/ES backtests, FRTB and Basel 2.5 capital calculations and loaders for official data from the European Central Bank and FRED.
+A C++17 library exposed to Python with pybind11, used by the notebooks of this repository. It prices European and American options (Black-Scholes closed form, Crank-Nicolson finite differences, Heston Fourier inversion and Quadratic-Exponential Monte Carlo), simulates the profit and loss of discretely delta-hedged option positions under GBM, Heston and GARCH filtered-historical-simulation dynamics, estimates GARCH-family models for rolling Value at Risk and Expected Shortfall, and runs the Kalman filter of the dynamic Nelson-Siegel yield-curve model. The Python package adds NumPy/SciPy reference implementations for validation, Heston calibration, VaR/ES backtests, FRTB and Basel 2.5 capital calculations, yield-curve factor models and forecast evaluation, interest-rate risk in the banking book (IRRBB) with swap-hedge optimisation, and loaders for official data from the European Central Bank and FRED.
 
 ## Requirements
 
@@ -45,8 +45,9 @@ python -m quant_engine.data --fx --yield-curve --fred DTB3    # optional: pre-do
 | [`notebooks/derivatives_pricing/heston_pricing_and_calibration.ipynb`](../../notebooks/derivatives_pricing/heston_pricing_and_calibration.ipynb) | ECB discount curve, validation of the finite-difference, Fourier and Monte Carlo engines, Heston smiles, calibration and American puts. |
 | [`notebooks/risk_measurement/fx_garch_var_backtesting.ipynb`](../../notebooks/risk_measurement/fx_garch_var_backtesting.ipynb) | GJR-GARCH-t and filtered historical simulation VaR/ES for a currency portfolio on ECB reference rates, regulatory backtests and FRTB versus Basel 2.5 capital. |
 | [`notebooks/case_studies/fx_option_desk_hedging.ipynb`](../../notebooks/case_studies/fx_option_desk_hedging.ipynb) | Case study: pricing, delta hedging, model risk, hedging frequency and a risk-based quote for a EUR/USD option sold to an exporter. |
+| [`notebooks/risk_measurement/yield_curve_dynamics_and_irrbb.ipynb`](../../notebooks/risk_measurement/yield_curve_dynamics_and_irrbb.ipynb) | Case study for a bank's ALCO: PCA and dynamic Nelson-Siegel models of the ECB curve (two-step and Kalman maximum likelihood), out-of-sample forecasts with Diebold-Mariano tests, EVE and NII under the BCBS scenarios, EBA outlier tests and minimax swap hedges. |
 
-Both notebooks download official data by default. Set the environment variable `QUANT_ENGINE_DATA_MODE=synthetic` before starting Jupyter to run them offline on synthetic data.
+The notebooks download official data by default. Set the environment variable `QUANT_ENGINE_DATA_MODE=synthetic` before starting Jupyter to run them offline on synthetic data.
 
 ## Inputs
 
@@ -65,6 +66,7 @@ Downloads are cached in `data/raw/ecb/` and `data/raw/fred/`, which Git ignores.
 | `outputs/heston_pricing/*.png` | Figures of the pricing notebook (curve, convergence, QE bias, smiles, calibration, American put). |
 | `outputs/fx_var_backtesting/*.png`, `backtest_summary.csv` | Figures, backtest table and capital chart of the risk notebook. |
 | `outputs/fx_option_desk/*.png`, `management_summary.txt` | P&L distributions, hedging frontier, pricing chart and the management summary of the case study. |
+| `outputs/yield_curve_irrbb/*.png` | Zero curves, PCA loadings, Nelson-Siegel factors, forecast accuracy by regime, IRRBB scenarios, historical EVE changes and hedge comparison. |
 | `docs/figures/*-light.png`, `*-dark.png` | README charts drawn by `python -m quant_engine.readme_figures` (official data; `--synthetic` offline); the only generated files committed. |
 
 ## Method
@@ -87,11 +89,17 @@ integrated with composite 16-point Gauss-Legendre panels until four consecutive 
 
 **Delta-hedging simulator** (`cpp/hedging.hpp`, `quant_engine/hedging.py`): the dealer sells a European option priced at one volatility and holds the Black-Scholes/Garman-Kohlhagen delta computed at another, rebalanced every $k$ steps; cash accrues at the domestic rate, the underlying position at the foreign rate (or dividend yield), each trade pays a proportional cost, and the payoff is settled at maturity. The underlying follows GBM, Heston (QE scheme) or GJR-GARCH with resampled standardised residuals (filtered historical simulation). Paths are shared across hedging policies (common random numbers) and blocks of 1,024 paths have their own random streams.
 
+**Yield-curve factor models** (`quant_engine/term_structure.py`, `cpp/term_structure.hpp`): month-end zero rates from the ECB Svensson parameters at 11 maturities (3 months to 30 years). Principal components of the covariance of monthly changes, with sign conventions for level, slope and curvature. Dynamic Nelson-Siegel (Diebold and Li, 2006): two-step estimation with the decay fixed at 0.0609 per month and AR(1) or VAR(1) factors; one-step state-space estimation (Diebold, Rudebusch and Aruoba, 2006) with $y_t = \Lambda(\lambda) f_t + e_t$, $f_t - \mu = A(f_{t-1}-\mu) + u_t$, the state started from its unconditional distribution, $Q$ parameterised by its Cholesky factor and measurement standard deviations either free by maturity or common. The C++ filter updates with the Woodbury identity and the matrix determinant lemma (only 3 x 3 factorisations per date, missing values skipped); the likelihood is maximised by BFGS restarted from its own solution until it stops improving, convergence is checked with a central-difference gradient, and standard errors come from the inverse numerical Hessian. With free measurement variances on the ECB curve the likelihood is degenerate (some maturities become observed without error), so the notebook uses the common-variance model.
+
+**Forecast evaluation**: recursive expanding-window forecasts at 1, 6 and 12 months (random walk; two-step DNS with direct AR(1) or iterated VAR(1); state-space DNS re-estimated every 12 months), each using data up to the origin only; Diebold-Mariano test on squared errors with $h-1$ autocovariances and the Harvey, Leybourne and Newbold (1997) correction.
+
+**IRRBB** (`quant_engine/term_structure.py`, `quant_engine/banking_book.py`): the six standardised scenarios of BCBS (2016) with euro shock sizes (parallel 200 bp, short 250 bp, long 100 bp), the post-shock floor of EBA/GL/2022/14 (-150 bp rising by 3 bp a year to 0% at 50 years, or the observed rate when lower), EVE as the present value of all interest-rate cash flows at continuously compounded zero rates, NII over one year with a constant balance sheet by the repricing-gap method, and the EBA supervisory outlier tests (EVE decline above 15% of Tier 1, NII decline above 5%). The stylised bank's behavioural assumptions are stated in the module: mortgage prepayment at a constant rate scaled by the BCBS scenario multipliers, non-maturity deposits split into an overnight part and a core part slotted evenly over a fixed horizon, quarterly repricing of floating items. Swaps are valued as a floating leg worth par at the next reset against a fixed bullet leg at the par rate. The hedge that maximises the worst EVE change over a scenario set (the six BCBS scenarios, optionally with every historical 12-month curve move) is a linear programme solved with HiGHS, with optional receive-fixed swaps, a gross-notional penalty and an NII constraint.
+
 **Random numbers and parallelism** (`cpp/random.hpp`, `cpp/parallel.hpp`): xoshiro256** seeded through SplitMix64 and Box-Muller normals, instead of the implementation-defined `std::normal_distribution`, so a seed gives the same numbers with any compiler. Monte Carlo paths are simulated in blocks of 4,096 with one random stream per block and block sums are combined in a fixed order: results are identical for any number of threads. Every notebook fixes its seed (`SEED`) and reports standard errors.
 
 ## Verification
 
-Run `python -m pytest tests/quant_engine` from the repository root (61 tests, about 15 seconds). The main checks and their tolerances:
+Run `python -m pytest tests/quant_engine` from the repository root (83 tests, about one minute). The main checks and their tolerances:
 
 | Check | Tolerance and justification |
 | --- | --- |
@@ -118,6 +126,18 @@ Run `python -m pytest tests/quant_engine` from the repository root (61 tests, ab
 | Selling above the true volatility and hedging at the true volatility locks in the premium difference | 4 standard errors plus $2\times10^{-5}$ |
 | Transaction costs: P&L difference equals the reported costs path by path | relative $10^{-9}$ |
 | GARCH-FHS with constant variance reproduces the variance of log returns; reproducibility across threads | 3%; bitwise equality |
+| Nelson-Siegel loadings: limits at zero and infinite maturity, curvature peak at 30 months with the Diebold-Li decay | $10^{-7}$ and $10^{-3}$; 0.1 month |
+| Cross-sectional fit recovers exact factors from noise-free curves | $10^{-10}$ |
+| Kalman log-likelihood (NumPy and C++) vs the joint Gaussian density of all observations | relative $10^{-10}$: the prediction-error decomposition is exact |
+| C++ vs NumPy filter with missing values: log-likelihood, filtered and predicted states | relative $10^{-11}$, absolute $10^{-10}$ |
+| Maximum likelihood on 500 simulated months: decay, autoregressive coefficients, measurement error (free and common) | 5%; within 4 standard errors and 0.05; 20% (10% with a common variance) |
+| Recursive forecasts (two-step and state space) | no look-ahead: shifting future yields leaves earlier forecast errors unchanged |
+| Diebold-Mariano statistic at horizon 1 vs the direct formula | relative $10^{-12}$ |
+| BCBS scenarios and EBA floor at known maturities; zero-coupon EVE change with and without the floor | exact values; relative $10^{-12}$ |
+| Mortgage pool: no prepayment equals the annuity; any prepayment rate repays the notional and is worth par at the loan rate | relative $10^{-12}$ |
+| Par swap worth zero on the base curve; payer swap gains when rates rise; NII by repricing gap vs hand calculation | $10^{-10}$; sign; exact |
+| Bank book: balance sheet balances, floating items at par, EVE by position adds up, swap effects linear in notional | relative $10^{-9}$ to $10^{-12}$ |
+| Hedge optimisation: minimax value equals the worst scenario, larger feasible sets never do worse, NII limit respected | $10^{-6}$ |
 
 The notebooks repeat the main validations on the data used (for example the convergence study of Crank-Nicolson and the bias study of the QE scheme).
 
@@ -128,17 +148,25 @@ The notebooks repeat the main validations on the data used (for example the conv
 - Acerbi, C. and Szekely, B. (2014). Backtesting expected shortfall. *Risk*, December.
 - Barone-Adesi, G., Giannopoulos, K. and Vosper, L. (1999). VaR without correlations for portfolios of derivative securities. *Journal of Futures Markets*, 19(5), 583-602.
 - Blackman, D. and Vigna, S. (2021). Scrambled linear pseudorandom number generators. *ACM Transactions on Mathematical Software*, 47(4). Reference code in the public domain: https://prng.di.unimi.it/
+- Basel Committee on Banking Supervision (2016). Interest rate risk in the banking book. Standards, April 2016.
 - Christoffersen, P. F. (1998). Evaluating interval forecasts. *International Economic Review*, 39(4), 841-862.
+- Diebold, F. X. and Li, C. (2006). Forecasting the term structure of government bond yields. *Journal of Econometrics*, 130(2), 337-364.
+- Diebold, F. X. and Mariano, R. S. (1995). Comparing predictive accuracy. *Journal of Business and Economic Statistics*, 13(3), 253-263.
+- Diebold, F. X., Rudebusch, G. D. and Aruoba, S. B. (2006). The macroeconomy and the yield curve: a dynamic latent factor approach. *Journal of Econometrics*, 131(1-2), 309-338.
+- European Banking Authority (2022). Guidelines on IRRBB and CSRBB (EBA/GL/2022/14) and regulatory technical standards on supervisory outlier tests (EBA/RTS/2022/10).
 - Fang, F. and Oosterlee, C. W. (2008). A novel pricing method for European options based on Fourier-cosine series expansions. *SIAM Journal on Scientific Computing*, 31(2), 826-848.
 - Basel Committee on Banking Supervision (2019). Minimum capital requirements for market risk, MAR33 and MAR99.
 - Garman, M. B. and Kohlhagen, S. W. (1983). Foreign currency option values. *Journal of International Money and Finance*, 2(3), 231-237.
 - Glosten, L. R., Jagannathan, R. and Runkle, D. E. (1993). On the relation between the expected value and the volatility of the nominal excess return on stocks. *Journal of Finance*, 48(5), 1779-1801.
+- Harvey, D., Leybourne, S. and Newbold, P. (1997). Testing the equality of prediction mean squared errors. *International Journal of Forecasting*, 13(2), 281-291.
 - Heston, S. L. (1993). A closed-form solution for options with stochastic volatility. *Review of Financial Studies*, 6(2), 327-343.
 - Kamal, M. and Derman, E. (1999). When you cannot hedge continuously: the corrections of Black-Scholes. *Risk*, 12(1), 82-85.
 - Kupiec, P. H. (1995). Techniques for verifying the accuracy of risk measurement models. *Journal of Derivatives*, 3(2), 73-84.
+- Litterman, R. and Scheinkman, J. (1991). Common factors affecting bond returns. *Journal of Fixed Income*, 1(1), 54-61.
 - Lagarias, J. C., Reeds, J. A., Wright, M. H. and Wright, P. E. (1998). Convergence properties of the Nelder-Mead simplex method in low dimensions. *SIAM Journal on Optimization*, 9(1), 112-147.
 - Marsaglia, G. and Tsang, W. W. (2000). A simple method for generating gamma variables. *ACM Transactions on Mathematical Software*, 26(3), 363-372.
 - McNeil, A. J., Frey, R. and Embrechts, P. (2015). *Quantitative Risk Management*, revised edition. Princeton University Press.
 - Rannacher, R. (1984). Finite element solution of diffusion problems with irregular data. *Numerische Mathematik*, 43, 309-327.
+- Nelson, C. R. and Siegel, A. F. (1987). Parsimonious modeling of yield curves. *Journal of Business*, 60(4), 473-489.
 - Svensson, L. E. O. (1994). Estimating and interpreting forward interest rates: Sweden 1992-1994. NBER Working Paper 4871.
 - European Central Bank: euro foreign exchange reference rates and euro area yield curves, https://www.ecb.europa.eu/stats/

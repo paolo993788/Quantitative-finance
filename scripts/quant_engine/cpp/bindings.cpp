@@ -14,6 +14,7 @@
 #include "garch.hpp"
 #include "hedging.hpp"
 #include "heston.hpp"
+#include "term_structure.hpp"
 
 namespace py = pybind11;
 using DoubleArray = py::array_t<double, py::array::c_style | py::array::forcecast>;
@@ -333,4 +334,29 @@ PYBIND11_MODULE(_core, m) {
         py::arg("mu"), py::arg("omega"), py::arg("alpha"), py::arg("gamma"), py::arg("beta"), py::arg("nu"),
         py::arg("n"), py::arg("seed"), py::arg("model") = "gjr", py::arg("dist") = "t", py::arg("burn") = 1000,
         "Simulates a GARCH(1,1) or GJR-GARCH(1,1) return series.");
+
+    m.def(
+        "dns_kalman_filter",
+        [](const DoubleArray& yields, const DoubleArray& maturities, double lam, const DoubleArray& mu, const DoubleArray& A,
+           const DoubleArray& Q, const DoubleArray& h, const DoubleArray& P0, bool keep_states) {
+            if (yields.ndim() != 2) throw py::value_error("yields must be a 2-D array (dates x maturities)");
+            const std::size_t T = static_cast<std::size_t>(yields.shape(0)), n = static_cast<std::size_t>(yields.shape(1));
+            const auto y = to_vector(yields), mat = to_vector(maturities), m_ = to_vector(mu), a = to_vector(A), q = to_vector(Q),
+                       hh = to_vector(h), p0 = to_vector(P0);
+            qe::DnsKalmanResult r;
+            {
+                py::gil_scoped_release release;
+                r = qe::dns_kalman_filter(y, T, n, mat, lam, m_, a, q, hh, p0, keep_states);
+            }
+            py::dict d;
+            d["loglik"] = r.loglik;
+            if (keep_states) {
+                d["filtered"] = to_matrix(r.filtered, T, 3);
+                d["predicted"] = to_matrix(r.predicted, T, 3);
+            }
+            return d;
+        },
+        py::arg("yields"), py::arg("maturities"), py::arg("lam"), py::arg("mu"), py::arg("A"), py::arg("Q"), py::arg("h"),
+        py::arg("P0"), py::arg("keep_states") = false,
+        "Kalman filter and Gaussian log-likelihood of the dynamic Nelson-Siegel state-space model.");
 }

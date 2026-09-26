@@ -3,7 +3,7 @@
 # which also needs a C++17 compiler (see the project README).
 numpy>=1.24
 scipy>=1.10
-pandas>=2.0
+pandas>=2.2            # month-end frequency alias "ME"
 matplotlib>=3.7
 pybind11>=2.12
 pytest>=7.4

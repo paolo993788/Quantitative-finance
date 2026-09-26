@@ -8,9 +8,9 @@
 ![Data](https://img.shields.io/badge/data-ECB%20%7C%20FRED-2E7D32)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-**Derivatives pricing, hedging and market-risk analytics with a C++17 engine driven from Python notebooks, validated against published benchmarks and applied to official European Central Bank data.**
+**Derivatives pricing, hedging, market-risk and interest-rate-risk analytics with a C++17 engine driven from Python notebooks, validated against published benchmarks and applied to official European Central Bank data.**
 
-The repository answers questions that a derivatives desk, a market-risk function or a corporate treasury actually face: how to price and hedge an option sold to a client, how much a hedged position can lose, whether a VaR model passes regulatory backtesting, and how much capital a trading book requires under FRTB. Numerically intensive parts (Monte Carlo, finite differences, Fourier integration, hundreds of maximum-likelihood fits) run in C++; analysis, validation and reporting stay in Python.
+The repository answers questions that a derivatives desk, a market-risk function, a bank's asset-liability committee or a corporate treasury actually face: how to price and hedge an option sold to a client, how much a hedged position can lose, whether a VaR model passes regulatory backtesting, how much capital a trading book requires under FRTB, whether the yield curve can be forecast, and which swap hedge keeps a bank's banking book within the supervisory limits. Numerically intensive parts (Monte Carlo, finite differences, Fourier integration, hundreds of maximum-likelihood fits, Kalman filtering) run in C++; analysis, validation and reporting stay in Python.
 
 ## Highlights
 
@@ -18,8 +18,9 @@ The repository answers questions that a derivatives desk, a market-risk function
 | --- | --- | --- |
 | FX options desk (case study) | Price and delta-hedge a six-month EUR/USD option sold to an Italian exporter, with dynamics estimated on ECB data | A constant-volatility model understates the 97.5% ES of the hedged position by a factor of about 4 compared with filtered historical simulation; the quote is set by a cost-of-capital rule on the simulated tail |
 | Market risk and capital | One-day 99% VaR and 97.5% ES of a currency book on ECB reference rates, 1999-2025, with regulatory backtests and FRTB capital | Filtered historical simulation passes every test (1.12% exceptions, Z2 about 0); historical simulation fails (red zone in 2008); FRTB charge about 9% of the book versus 22% under Basel 2.5, stressed period April 2008 - March 2009 |
+| Yield curve and IRRBB (case study) | ECB AAA curve 2004-2025: PCA, dynamic Nelson-Siegel by two-step OLS and by Kalman-filter maximum likelihood in C++, recursive forecasts with Diebold-Mariano tests; EVE and NII of a stylised bank under the six BCBS scenarios with the EBA floor and outlier tests; minimax swap hedges by linear programming | No model beats the random walk over 2015-2025 (it wins in the negative-rate years, loses mildly in 2022-2025); the unhedged bank loses 46% of Tier 1 in the parallel-up scenario (limit 15%); a hedge fitted to the six scenarios alone fails on history (18.5% loss in the worst year), while one fitted to scenarios and history keeps the worst loss at 5.8% with two swaps |
 | Option pricing engines | Black-Scholes, Crank-Nicolson with PSOR for American options, Heston by Fourier inversion and QE Monte Carlo, calibration | Heston price matches the Fang-Oosterlee (2008) benchmark to 2e-8; second-order convergence of Crank-Nicolson; C++ Monte Carlo about 7x faster than vectorised NumPy |
-| Engineering | pybind11 extension, parallel and thread-independent random streams, NumPy reference implementations | 61 automated tests with justified tolerances; results identical for any number of threads |
+| Engineering | pybind11 extension, parallel and thread-independent random streams, NumPy reference implementations | 83 automated tests with justified tolerances; results identical for any number of threads; the C++ Kalman filter is about 100 times faster than NumPy |
 
 ## Charts
 
@@ -38,6 +39,16 @@ The repository answers questions that a derivatives desk, a market-risk function
   <img alt="Yearly exceptions of the one-day 99% VaR for a book of four currencies against the euro, 2002-2025: historical simulation reaches 18 exceptions in 2008 (red zone) and is in the yellow or red zone in eight years; filtered historical simulation never exceeds 6 and is in the yellow zone in three years." src="docs/figures/var_exceptions-light.png">
 </picture>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/irrbb_hedging-dark.png">
+  <img alt="Change in economic value of equity of a stylised euro area bank, % of Tier 1, under the six BCBS scenarios and in the worst historical 12-month curve move: unhedged losses reach 46% in parallel up and 48% in the worst year; a pay-fixed hedge fitted to the six scenarios leaves 17% in the worst year and a pay-or-receive hedge fitted to the six scenarios leaves 18.5%, both beyond the 15% threshold; a hedge fitted to scenarios and history keeps every loss within 5.8%." src="docs/figures/irrbb_hedging-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/yield_forecasts-dark.png">
+  <img alt="Twelve-month forecast RMSE of three dynamic Nelson-Siegel models relative to the random walk, by maturity: in 2015-2021 the ratios range from 1.1 to 6, highest at short maturities; in 2022-2025 the VAR(1) and state-space models are between 0.78 and 1.0, while the direct AR(1) model stays above 1." src="docs/figures/yield_forecasts-light.png">
+</picture>
+
 The charts are drawn by `python -m quant_engine.readme_figures` with the same data, models and seeds as the notebooks (light and dark variants in `docs/figures/`).
 
 ## Catalogue
@@ -47,6 +58,7 @@ The charts are drawn by `python -m quant_engine.readme_figures` with the same da
 | [`scripts/quant_engine`](scripts/quant_engine/README.md) (library) | Reusable C++/Python engines for pricing, hedging simulation, GARCH risk models, backtests and regulatory capital | ECB, FRED loaders |
 | [FX option desk: pricing and hedging](notebooks/case_studies/fx_option_desk_hedging.ipynb) | Which volatility should the desk quote for a EUR call / USD put sold to an exporter, how should it hedge, and how large is the model risk? | ECB EUR/USD, ECB AAA curve, US Treasury bill (FRED) |
 | [FX market risk and FRTB capital](notebooks/risk_measurement/fx_garch_var_backtesting.ipynb) | Does a GARCH-based VaR/ES model pass regulatory backtests, and how much capital does the book need under FRTB and Basel 2.5? | ECB reference rates for USD, GBP, JPY, CHF |
+| [Yield-curve dynamics and IRRBB](notebooks/risk_measurement/yield_curve_dynamics_and_irrbb.ipynb) | Can the ALCO steer the balance sheet on yield-curve forecasts, does the bank breach the EBA outlier tests, and which swap hedge brings it within limits? | ECB AAA yield curve, 2004-2025 |
 | [Heston pricing and calibration](notebooks/derivatives_pricing/heston_pricing_and_calibration.ipynb) | Are the pricing engines accurate and fast enough for production-style calibration, and what drives the smile? | ECB AAA yield curve |
 | [GARCH and VaR backtesting in R](notebooks/r_crosschecks/fx_garch_var_r.ipynb) (R) | Do an independent R estimation (fGarch) and independent backtest statistics reproduce the C++ risk engine? | ECB reference rates |
 
@@ -59,8 +71,9 @@ notebooks/  ──►  quant_engine (Python)                  ──►  quant_e
                  data loaders (ECB, FRED)                     Black-Scholes, implied volatility
                  NumPy/SciPy reference implementations        Crank-Nicolson + PSOR (American options)
                  calibration, backtests, capital              Heston Fourier + QE Monte Carlo
-                 reporting                                    GJR-GARCH MLE, rolling VaR/ES (parallel)
-                                                              discrete delta-hedging simulator
+                 yield-curve PCA, Nelson-Siegel, forecasts    GJR-GARCH MLE, rolling VaR/ES (parallel)
+                 IRRBB: EVE/NII, EBA tests, hedge LP          discrete delta-hedging simulator
+                 reporting                                    dynamic Nelson-Siegel Kalman filter
 ```
 
 ## Getting started
@@ -93,7 +106,7 @@ The notebooks are stored with the outputs of a full run on official data (Septem
 
 ## Roadmap
 
-SABR and local volatility calibration to FX and equity smiles; jump-diffusion and Lévy models; LSTM volatility forecasts benchmarked against GARCH; deep hedging with transaction costs; CVA for the FX option case study.
+Arbitrage-free Nelson-Siegel and shadow-rate term-structure models; behavioural deposit models estimated on ECB MFI interest-rate statistics; SABR and local volatility calibration to FX and equity smiles; jump-diffusion and Lévy models; LSTM volatility forecasts benchmarked against GARCH; deep hedging with transaction costs; CVA for the FX option case study.
 
 ## Conventions
 
