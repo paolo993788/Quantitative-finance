@@ -2,6 +2,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![C++](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)
+![R](https://img.shields.io/badge/R-4.2%2B-276DC3?logo=r&logoColor=white)
 ![pybind11](https://img.shields.io/badge/bindings-pybind11-5C6BC0)
 ![Tests](https://img.shields.io/badge/tests-pytest-0A9EDC?logo=pytest&logoColor=white)
 ![Data](https://img.shields.io/badge/data-ECB%20%7C%20FRED-2E7D32)
@@ -47,6 +48,7 @@ The charts are drawn by `python -m quant_engine.readme_figures` with the same da
 | [FX option desk: pricing and hedging](notebooks/case_studies/fx_option_desk_hedging.ipynb) | Which volatility should the desk quote for a EUR call / USD put sold to an exporter, how should it hedge, and how large is the model risk? | ECB EUR/USD, ECB AAA curve, US Treasury bill (FRED) |
 | [FX market risk and FRTB capital](notebooks/risk_measurement/fx_garch_var_backtesting.ipynb) | Does a GARCH-based VaR/ES model pass regulatory backtests, and how much capital does the book need under FRTB and Basel 2.5? | ECB reference rates for USD, GBP, JPY, CHF |
 | [Heston pricing and calibration](notebooks/derivatives_pricing/heston_pricing_and_calibration.ipynb) | Are the pricing engines accurate and fast enough for production-style calibration, and what drives the smile? | ECB AAA yield curve |
+| [GARCH and VaR backtesting in R](notebooks/r_crosschecks/fx_garch_var_r.ipynb) (R) | Do an independent R estimation (fGarch) and independent backtest statistics reproduce the C++ risk engine? | ECB reference rates |
 
 Each notebook states its assumptions, fixes its random seeds, validates the numbers it relies on and ends with conclusions and limitations. Figures and tables are written to `outputs/`.
 
@@ -75,12 +77,14 @@ python -m pytest tests/quant_engine
 
 Open a notebook in Visual Studio Code (extensions *Python*, *Jupyter* and *C/C++*) and select the `.venv` environment as kernel. Official data are downloaded and cached on first use; set `QUANT_ENGINE_DATA_MODE=synthetic` to work offline. Details, methods and the full validation table are in the [project README](scripts/quant_engine/README.md).
 
+The notebooks are stored with the outputs of a full run on official data (September 2026), so tables and charts can be read directly on GitHub. The R notebooks in [`notebooks/r_crosschecks/`](notebooks/r_crosschecks/README.md) recompute the main results with independent R packages; they need R 4.2 or later: run `Rscript notebooks/r_crosschecks/install_packages.R` once and select the **R** kernel.
+
 ## Repository layout
 
 ```text
 .
 ├── scripts/quant_engine/   C++ engine (cpp/), Python package, build and dependency files
-├── notebooks/              case_studies/, derivatives_pricing/, risk_measurement/
+├── notebooks/              case_studies/, derivatives_pricing/, risk_measurement/, r_crosschecks/ (R)
 ├── tests/quant_engine/     validation suite (pytest)
 ├── docs/                   project README template and publishing workflow
 ├── data/                   download cache (ignored by Git) and small examples
