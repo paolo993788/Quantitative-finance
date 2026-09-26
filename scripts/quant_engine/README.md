@@ -65,6 +65,7 @@ Downloads are cached in `data/raw/ecb/` and `data/raw/fred/`, which Git ignores.
 | `outputs/heston_pricing/*.png` | Figures of the pricing notebook (curve, convergence, QE bias, smiles, calibration, American put). |
 | `outputs/fx_var_backtesting/*.png`, `backtest_summary.csv` | Figures, backtest table and capital chart of the risk notebook. |
 | `outputs/fx_option_desk/*.png`, `management_summary.txt` | P&L distributions, hedging frontier, pricing chart and the management summary of the case study. |
+| `docs/figures/*-light.png`, `*-dark.png` | README charts drawn by `python -m quant_engine.readme_figures` (official data; `--synthetic` offline); the only generated files committed. |
 
 ## Method
 
@@ -90,7 +91,7 @@ integrated with composite 16-point Gauss-Legendre panels until four consecutive 
 
 ## Verification
 
-Run `python -m pytest tests/quant_engine` from the repository root (60 tests, about 10 seconds). The main checks and their tolerances:
+Run `python -m pytest tests/quant_engine` from the repository root (61 tests, about 15 seconds). The main checks and their tolerances:
 
 | Check | Tolerance and justification |
 | --- | --- |

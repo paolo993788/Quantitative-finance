@@ -18,7 +18,26 @@ The repository answers questions that a derivatives desk, a market-risk function
 | FX options desk (case study) | Price and delta-hedge a six-month EUR/USD option sold to an Italian exporter, with dynamics estimated on ECB data | A constant-volatility model understates the 97.5% ES of the hedged position by a factor of about 4 compared with filtered historical simulation; the quote is set by a cost-of-capital rule on the simulated tail |
 | Market risk and capital | One-day 99% VaR and 97.5% ES of a currency book on ECB reference rates, 1999-2025, with regulatory backtests and FRTB capital | Filtered historical simulation passes every test (1.12% exceptions, Z2 about 0); historical simulation fails (red zone in 2008); FRTB charge about 9% of the book versus 22% under Basel 2.5, stressed period April 2008 - March 2009 |
 | Option pricing engines | Black-Scholes, Crank-Nicolson with PSOR for American options, Heston by Fourier inversion and QE Monte Carlo, calibration | Heston price matches the Fang-Oosterlee (2008) benchmark to 2e-8; second-order convergence of Crank-Nicolson; C++ Monte Carlo about 7x faster than vectorised NumPy |
-| Engineering | pybind11 extension, parallel and thread-independent random streams, NumPy reference implementations | 60 automated tests with justified tolerances; results identical for any number of threads |
+| Engineering | pybind11 extension, parallel and thread-independent random streams, NumPy reference implementations | 61 automated tests with justified tolerances; results identical for any number of threads |
+
+## Charts
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/hedging_pnl-dark.png">
+  <img alt="Distributions of the P&L of a six-month EUR call sold to an exporter and delta-hedged daily, under three models: the 97.5% expected shortfall is EUR 38.5 thousand with constant volatility, EUR 97 thousand with Heston and EUR 156 thousand with GARCH and historical shocks, four times the constant-volatility figure." src="docs/figures/hedging_pnl-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/hedging_frontier-dark.png">
+  <img alt="Cost and risk of the delta hedge by rebalancing frequency: daily hedging costs EUR 2.2 thousand with a P&L standard deviation of EUR 41.6 thousand; weekly EUR 1.3 thousand and 48.6 thousand; monthly EUR 0.8 thousand and 69.7 thousand." src="docs/figures/hedging_frontier-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/var_exceptions-dark.png">
+  <img alt="Yearly exceptions of the one-day 99% VaR for a book of four currencies against the euro, 2002-2025: historical simulation reaches 18 exceptions in 2008 (red zone) and is in the yellow or red zone in eight years; filtered historical simulation never exceeds 6 and is in the yellow zone in three years." src="docs/figures/var_exceptions-light.png">
+</picture>
+
+The charts are drawn by `python -m quant_engine.readme_figures` with the same data, models and seeds as the notebooks (light and dark variants in `docs/figures/`).
 
 ## Catalogue
 
