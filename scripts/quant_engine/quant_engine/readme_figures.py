@@ -16,13 +16,19 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import curves, data, garch, hedging, risk, synthetic
-from .figstyle import header, new_figure, point_label, render
+from . import banking_book, curves, data, garch, hedging, risk, synthetic
+from . import term_structure as ts
+from .figstyle import end_label, header, label_offsets, new_figure, point_label, render
 
 # Settings shared with the notebooks (FX option desk case study and FX risk notebook).
 VALUATION_DATE, NOTIONAL_EUR, TENOR_DAYS, COST_RATE = "2025-12-31", 10_000_000, 126, 0.5e-4
 ASSUMED_RATES, SEED = {"EUR": 0.020, "USD": 0.040}, 20251231
 START, END, CURRENCIES, WINDOW, REFIT_EVERY, VAR_ALPHA = "1999-01-04", "2025-12-31", ("USD", "GBP", "JPY", "CHF"), 1000, 20, 0.01
+# Settings shared with the yield-curve and IRRBB notebook.
+YC_START, YC_END = "2004-09-01", "2025-12-31"
+MATURITIES = np.array([0.25, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30])
+FIRST_ORIGIN, HORIZON = "2014-12-31", 12
+REGIMES = {"2015-2021: negative rates": ("2015-01-01", "2021-12-31"), "2022-2025: tightening and easing": ("2022-01-01", "2025-12-31")}
 
 
 def _rates(official, T):
@@ -85,6 +91,40 @@ def load(official=True, n_paths=200_000) -> dict:
     out["source"] = ("Source: ECB euro reference rates and AAA yield curve; US Treasury bill (FRED DTB3)" if official
                      else "Simulated rates, not market data")
     return out
+
+
+def load_rates(official=True) -> dict:
+    svensson = (data.load_ecb_svensson_parameters(YC_START, YC_END) if official
+                else synthetic.svensson_history(YC_START, YC_END))
+    monthly = svensson.resample("ME").last().dropna()
+    Y = ts.zero_curves(svensson, MATURITIES)
+    fc = ts.recursive_forecasts(Y, FIRST_ORIGIN, (HORIZON,))[HORIZON]
+    kfc = ts.recursive_kalman_forecasts(Y, FIRST_ORIGIN, (HORIZON,), refit_every=12, common_h=True)[HORIZON]
+    errors = {"Nelson-Siegel, direct AR(1)": fc["DNS AR(1), direct"], "Nelson-Siegel, VAR(1)": fc["DNS VAR(1)"],
+              "Nelson-Siegel, state space": kfc.loc[fc["random walk"].index]}
+    ratios = {}
+    for regime, (a, b) in REGIMES.items():
+        rw = np.sqrt((fc["random walk"].loc[a:b] ** 2).mean())
+        ratios[regime] = pd.DataFrame({k: np.sqrt((e.loc[a:b] ** 2).mean()) / rw for k, e in errors.items()})
+
+    zero = curves.SvenssonCurve.from_series(svensson.iloc[-1]).zero_rate
+    book = banking_book.BankBook()
+    designs = {"Pay fixed, fitted to the six scenarios": dict(),
+               "Pay or receive, fitted to the six scenarios": dict(allow_receive=True, penalty=1e-4),
+               "Pay or receive, fitted to scenarios and history": dict(allow_receive=True, penalty=1e-2,
+                                                                       svensson_monthly=monthly)}
+    eve = {"Unhedged": book.delta_eve(zero)}
+    hist = {"Unhedged": book.historical_eve_changes(zero, monthly)}
+    for name, kw in designs.items():
+        res = banking_book.minimax_hedge(book, zero, (2, 5, 10, 20), **kw)
+        eve[name] = res["eve"]
+        hist[name] = res.get("historical", book.historical_eve_changes(zero, monthly, swaps=res["swaps"]))
+    table = pd.DataFrame(eve)
+    table.loc["worst historical year"] = pd.Series({k: v.min() for k, v in hist.items()})
+    source = ("Source: ECB euro area yield curve (AAA), Svensson parameters" if official
+              else "Simulated yield curves, not market data")
+    return {"ratios": ratios, "eve": 100 * table / book.tier1, "source": source,
+            "base_date": svensson.index[-1]}
 
 
 def hedging_pnl(t, d):
@@ -161,19 +201,78 @@ def var_exceptions(t, d):
     return fig
 
 
-FIGURES = {"hedging_pnl": hedging_pnl, "hedging_frontier": hedging_frontier, "var_exceptions": var_exceptions}
+def yield_forecasts(t, d):
+    fig, axes = new_figure(t, ncols=2, sharey=True)
+    fig.subplots_adjust(right=0.97, bottom=0.2, top=0.74, wspace=0.08)
+    for ax, (regime, table) in zip(axes, d["ratios"].items()):
+        x = np.log(table.index.to_numpy(dtype=float))
+        for k, col in enumerate(table.columns):
+            ax.plot(x, table[col].to_numpy(), color=t["series"][k], lw=2, marker="o", ms=4, label=col)
+        ax.axhline(1.0, color=t["ink2"], lw=1)
+        ax.set_yscale("log")
+        ax.set_yticks([0.5, 0.75, 1, 1.5, 2, 3, 4, 6], ["0.5", "0.75", "1", "1.5", "2", "3", "4", "6"])
+        ax.minorticks_off()
+        shown = [0.25, 1, 2, 5, 10, 30]
+        ax.set_xticks(np.log(shown), ["3m", "1y", "2y", "5y", "10y", "30y"])
+        ax.set_title(regime, fontsize=10, color=t["ink2"], loc="left")
+        ax.set_xlabel("maturity")
+    axes[0].set_ylabel("RMSE relative to random walk")
+    axes[0].annotate("random walk = 1", (np.log(30), 1.0), xytext=(0, -4), textcoords="offset points", ha="right", va="top",
+                     fontsize=8, color=t["ink2"])
+    axes[1].legend(loc="upper right")
+    header(fig, t, "Nelson-Siegel forecasts beat no change only in the 2022-2025 rate cycle",
+           "12-month-ahead forecast error of three dynamic Nelson-Siegel models relative to no change, out of sample",
+           d["source"] + "; month-end zero rates, recursive estimation")
+    fig.texts[-1].set_y(0.015)
+    return fig
+
+
+def irrbb_hedging(t, d):
+    table = d["eve"]
+    fig, ax = new_figure(t, height=5.0)
+    fig.subplots_adjust(right=0.97, bottom=0.14, top=0.74)
+    groups = list(table.index)
+    x = np.arange(len(groups)) + np.r_[np.zeros(len(groups) - 1), 0.5]
+    width = 0.19
+    for k, col in enumerate(table.columns):
+        ax.bar(x + (k - 1.5) * (width + 0.01), table[col].to_numpy(), width, color=t["series"][k], label=col)
+    ax.axhline(0, color=t["axis"], lw=1)
+    ax.axhline(-100 * banking_book.EVE_OUTLIER_THRESHOLD, color=t["ink2"], lw=1, ls=(0, (4, 3)))
+    ax.annotate("supervisory outlier threshold:\nEVE loss of 15% of Tier 1", (x[3] - 0.4, -100 * banking_book.EVE_OUTLIER_THRESHOLD),
+                xytext=(0, 4), textcoords="offset points", fontsize=8, color=t["ink2"], va="bottom")
+    ax.axvline(x[-1] - 0.75, color=t["grid"], lw=1)
+    ax.set_xticks(x, [g.replace("short rates", "short") for g in groups])
+    ax.set_ylabel("change in EVE, % of Tier 1")
+    ax.legend(loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.02), fontsize=8.5)
+    ax.set_ylim(min(table.to_numpy().min() * 1.1, -60), table.to_numpy().max() * 1.35)
+    robust = table.columns[-1]
+    header(fig, t, "A hedge fitted only to the six supervisory scenarios fails on history",
+           f"Stylised euro area bank, curve of {d['base_date']:%d %B %Y}: change in economic value of equity by BCBS scenario\n"
+           "and in the worst historical 12-month move of the curve since 2004",
+           d["source"] + f"; swap hedges from minimax linear programmes (robust hedge: worst loss {-table[robust].min():.1f}% of Tier 1)")
+    fig.texts[-1].set_y(0.015)
+    return fig
+
+
+FIGURES = {"hedging_pnl": (hedging_pnl, "fx"), "hedging_frontier": (hedging_frontier, "fx"),
+           "var_exceptions": (var_exceptions, "fx"), "yield_forecasts": (yield_forecasts, "rates"),
+           "irrbb_hedging": (irrbb_hedging, "rates")}
+LOADERS = {"fx": load, "rates": load_rates}
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Draw the README figures (light and dark variants).")
     parser.add_argument("--out", default=str(data.repository_root() / "docs" / "figures"))
     parser.add_argument("--synthetic", action="store_true", help="use simulated rates (offline)")
+    parser.add_argument("--only", nargs="*", choices=list(FIGURES), help="draw only these figures")
     args = parser.parse_args(argv)
     import matplotlib
     matplotlib.use("Agg")
-    d = load(official=not args.synthetic)
-    for name, builder in FIGURES.items():
-        for path in render(builder, name, Path(args.out), d):
+    names = args.only or list(FIGURES)
+    inputs = {key: LOADERS[key](official=not args.synthetic) for key in {FIGURES[n][1] for n in names}}
+    for name in names:
+        builder, key = FIGURES[name]
+        for path in render(builder, name, Path(args.out), inputs[key]):
             print(path)
 
 

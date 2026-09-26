@@ -40,3 +40,20 @@ def fx_rates(start="2000-01-03", end="2025-12-31", seed=2024) -> pd.DataFrame:
     frame = pd.DataFrame(columns, index=dates)
     frame.attrs["source"] = f"synthetic GJR-GARCH-t rates (seed {seed}), not official data"
     return frame
+
+
+def svensson_history(start="2004-09-01", end="2025-12-31", seed=2024) -> pd.DataFrame:
+    """Daily Svensson parameters with mean-reverting betas (business days, illustrative only)."""
+    dates = pd.bdate_range(start, end)
+    rng = np.random.default_rng(seed)
+    mean = np.array([3.0, -1.5, -2.0, 2.0])
+    vol = np.array([0.035, 0.045, 0.09, 0.11])
+    phi = 1.0 - 1.0 / 750.0
+    x = np.empty((len(dates), 4))
+    x[0] = [ILLUSTRATIVE_SVENSSON[k] for k in ("BETA0", "BETA1", "BETA2", "BETA3")]
+    for t in range(1, len(dates)):
+        x[t] = mean + phi * (x[t - 1] - mean) + vol * rng.standard_normal(4)
+    frame = pd.DataFrame(x, index=dates, columns=["BETA0", "BETA1", "BETA2", "BETA3"])
+    frame["TAU1"], frame["TAU2"] = ILLUSTRATIVE_SVENSSON["TAU1"], ILLUSTRATIVE_SVENSSON["TAU2"]
+    frame.attrs["source"] = f"synthetic mean-reverting Svensson parameters (seed {seed}), not official data"
+    return frame
