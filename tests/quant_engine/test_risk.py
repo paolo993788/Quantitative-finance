@@ -69,3 +69,25 @@ def test_historical_var_uses_past_window():
     out = risk.historical_var_es(r, window=5, alpha=0.2)
     assert out.index[0] == 5
     assert out["var"].iloc[0] == pytest.approx(-np.quantile(r.iloc[:5], 0.2))
+
+
+def test_regulatory_multipliers():
+    assert [risk.frtb_multiplier(k) for k in (0, 4, 5, 9, 10, 15)] == [1.5, 1.5, 1.70, 1.92, 2.0, 2.0]
+    assert [risk.basel25_multiplier(k) for k in (4, 5, 7, 12)] == [3.0, 3.40, 3.65, 4.0]
+
+
+def test_historical_es_and_stressed_window():
+    rng = np.random.default_rng(3)
+    r = pd.Series(rng.normal(0, 0.5, 3000), index=pd.bdate_range("2010-01-01", periods=3000))
+    r.iloc[2000:2250] *= 4.0  # a stressed year
+    var, es = risk.historical_es(np.arange(1.0, 41.0) - 20.5, alpha=0.025)
+    assert var == pytest.approx(-np.quantile(np.arange(1.0, 41.0) - 20.5, 0.025))
+    assert es == pytest.approx(19.5)  # only the smallest value lies at or below the 2.5% quantile
+    stress = risk.stressed_period(r, horizon=10, window=250)
+    assert r.index[1900] <= stress["start"] <= r.index[2050]
+    assert stress["es"] > 3 * risk.rolling_historical_es(r.iloc[:1500], 10, 250)["es"].median()
+
+
+def test_capital_charge_takes_the_larger_term():
+    assert risk.capital_charge(pd.Series(np.full(60, 1.0)), 1.5) == pytest.approx(1.5)   # average term binds
+    assert risk.capital_charge(pd.Series(np.r_[np.full(59, 1.0), 10.0]), 1.5) == pytest.approx(10.0)  # latest binds
