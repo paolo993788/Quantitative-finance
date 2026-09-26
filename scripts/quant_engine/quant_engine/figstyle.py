@@ -122,3 +122,33 @@ def label_offsets(ax, values, min_gap=13.0) -> list[float]:
         placed.append(y)
         offsets[i] = y - y_pts[i]
     return offsets
+
+
+# --------------------------------------------------------------------------- notebooks
+
+NOTEBOOK = THEMES["light"]
+SERIES = NOTEBOOK["series"]            # categorical order: blue, orange, aqua, yellow, magenta (never cycled)
+NEGATIVE = NOTEBOOK["negative"]        # losses, breaches and thresholds
+MUTED = NOTEBOOK["muted"]              # context series drawn behind the ones that matter
+ORDINAL = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"]   # one hue, light to dark (validated, --ordinal)
+
+
+def notebook_style(dpi: int = 110) -> None:
+    """Matplotlib defaults for the notebooks: the light theme of the README charts (validated categorical
+    order, solid hairline grid behind the marks, no top or right spine, frameless legends, left-aligned
+    titles) and constrained layout, so that legends placed outside the axes, for example with
+    ``fig.legend(loc="outside lower center")``, never overlap titles, labels or data."""
+    import matplotlib as mpl
+
+    params = rc(NOTEBOOK)
+    params.update({"figure.dpi": dpi, "figure.constrained_layout.use": True, "axes.titlesize": 11,
+                   "axes.titlelocation": "left", "axes.titlepad": 8, "legend.fontsize": 8.5})
+    mpl.rcParams.update(params)
+
+
+def ordinal_colors(n: int) -> list:
+    """n colours along the validated blue ramp, light to dark, for ordered categories such as dates."""
+    from matplotlib.colors import LinearSegmentedColormap
+
+    cmap = LinearSegmentedColormap.from_list("ordinal", ORDINAL)
+    return [cmap(v) for v in np.linspace(0.0, 1.0, n)]
