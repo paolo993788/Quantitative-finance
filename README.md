@@ -28,7 +28,25 @@ Folders are created when their first content is added.
 
 ## Catalogue
 
-No projects have been published yet. Each new script or notebook will be listed here with a short description.
+| Item | Type | Description |
+| --- | --- | --- |
+| [`scripts/quant_engine`](scripts/quant_engine/README.md) | Python + C++ library | C++17 engines exposed with pybind11: Black-Scholes, Crank-Nicolson (European and American), Heston Fourier and QE Monte Carlo, GARCH/GJR-GARCH estimation and rolling VaR/ES; NumPy reference implementations, backtests and ECB data loaders. |
+| [`notebooks/derivatives_pricing/heston_pricing_and_calibration.ipynb`](notebooks/derivatives_pricing/heston_pricing_and_calibration.ipynb) | Notebook | Validation of the pricing engines against closed forms and published benchmarks, Heston smiles and calibration, American puts, discounting with the ECB AAA yield curve. |
+| [`notebooks/risk_measurement/fx_garch_var_backtesting.ipynb`](notebooks/risk_measurement/fx_garch_var_backtesting.ipynb) | Notebook | One-day 99% VaR and 97.5% ES of a euro investor's currency portfolio on ECB reference rates: historical simulation, GARCH-N, GJR-t and filtered historical simulation with Kupiec, Christoffersen, traffic-light and Acerbi-Szekely backtests. |
+
+## Getting started
+
+The notebooks run in Visual Studio Code (with the *Python*, *Jupyter* and *C/C++* extensions) or in Jupyter. The numerical engines are written in C++ and compiled into a Python extension, so a C++17 compiler is required (Visual Studio Build Tools on Windows, Xcode Command Line Tools on macOS, GCC or Clang on Linux). From the repository root:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate            # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -r scripts/quant_engine/requirements.txt
+python -m pip install -e scripts/quant_engine
+python -m pytest tests/quant_engine
+```
+
+Then open a notebook and select the `.venv` environment as kernel. The notebooks download official data from the European Central Bank on first use; see the [project README](scripts/quant_engine/README.md) for details and for the offline mode.
 
 ## Conventions
 

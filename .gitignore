@@ -46,6 +46,14 @@ htmlcov/
 build/
 dist/
 
+# Compiled extensions and object files (Python + C++ projects)
+*.so
+*.pyd
+*.dylib
+*.dll
+*.o
+*.obj
+
 # R
 .Rhistory
 .RData
