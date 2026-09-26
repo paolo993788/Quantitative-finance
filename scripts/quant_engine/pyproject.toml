@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=64", "wheel", "pybind11>=2.12"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-engine"
+version = "0.1.0"
+description = "C++-accelerated option pricing and market risk engines with Python analysis tools"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+]
+
+[tool.setuptools]
+packages = ["quant_engine"]

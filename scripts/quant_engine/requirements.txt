@@ -1,0 +1,10 @@
+# Runtime and notebook dependencies for scripts/quant_engine (Python 3.10+).
+# The C++ extension itself is built by `python -m pip install -e scripts/quant_engine`,
+# which also needs a C++17 compiler (see the project README).
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+matplotlib>=3.7
+pybind11>=2.12
+pytest>=7.4
+ipykernel>=6.25
