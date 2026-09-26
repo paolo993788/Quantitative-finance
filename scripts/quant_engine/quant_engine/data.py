@@ -9,10 +9,13 @@ acknowledged, see https://www.ecb.europa.eu/services/using-our-site/disclaimer/h
 * Euro area yield curve, AAA-rated central government bonds, Svensson model
   parameters (ECB Data Portal, dataset YC, series
   YC.B.U2.EUR.4F.G_N_A.SV_C_YM.{BETA0,BETA1,BETA2,BETA3,TAU1,TAU2}).
+* US interest rates from FRED (Federal Reserve Bank of St. Louis), for
+  example DTB3, the 3-month Treasury bill secondary market rate (percent,
+  Board of Governors of the Federal Reserve System, H.15; public domain).
 
-Downloads are cached under ``data/raw/ecb/`` in the repository (ignored by
-Git). Set the environment variable ``QUANT_ENGINE_DATA_DIR`` to use another
-cache folder. Command-line usage from the repository root:
+Downloads are cached under ``data/raw/ecb/`` and ``data/raw/fred/`` in the
+repository (ignored by Git). Set the environment variable
+``QUANT_ENGINE_DATA_DIR`` to use another base folder. Command-line usage from the repository root:
 
     python -m quant_engine.data --fx --yield-curve --start 2004-09-06 --end 2025-12-31
 """
@@ -29,6 +32,7 @@ from pathlib import Path
 import pandas as pd
 
 ECB_FX_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.zip"
+FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}"
 ECB_YC_URL = ("https://data-api.ecb.europa.eu/service/data/YC/"
               "B.U2.EUR.4F.G_N_A.SV_C_YM.BETA0+BETA1+BETA2+BETA3+TAU1+TAU2"
               "?format=csvdata&startPeriod={start}&endPeriod={end}")
@@ -44,9 +48,10 @@ def repository_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def cache_dir() -> Path:
+def cache_dir(source: str = "ecb") -> Path:
+    """Cache folder for a data source: data/raw/<source>, or $QUANT_ENGINE_DATA_DIR/<source>."""
     env = os.environ.get("QUANT_ENGINE_DATA_DIR")
-    path = Path(env) if env else repository_root() / "data" / "raw" / "ecb"
+    path = (Path(env) if env else repository_root() / "data" / "raw") / source
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -110,20 +115,43 @@ def load_ecb_svensson_parameters(start: str, end: str, refresh=False) -> pd.Data
     return table
 
 
+def parse_fred_csv(text: str) -> pd.Series:
+    """Parse a fredgraph.csv file (first column dates, second values; '.' or blank = missing)."""
+    frame = pd.read_csv(io.StringIO(text), na_values=[".", ""])
+    series = pd.Series(pd.to_numeric(frame[frame.columns[1]], errors="coerce").to_numpy(),
+                       index=pd.to_datetime(frame[frame.columns[0]]), name=frame.columns[1])
+    series.index.name = "date"
+    return series.dropna().sort_index()
+
+
+def load_fred(series_id: str, start=None, end=None, refresh=False) -> pd.Series:
+    """A daily FRED series, cached in data/raw/fred/."""
+    path = cache_dir("fred") / f"{series_id}.csv"
+    if refresh or not path.exists():
+        download(FRED_URL.format(series=series_id), path)
+    series = parse_fred_csv(path.read_text(encoding="utf-8")).loc[start:end]
+    series.attrs["source"] = f"FRED, Federal Reserve Bank of St. Louis, series {series_id}"
+    return series
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Download official ECB data into the local cache.")
     parser.add_argument("--fx", action="store_true", help="euro foreign exchange reference rates")
     parser.add_argument("--yield-curve", action="store_true", help="AAA yield curve Svensson parameters")
     parser.add_argument("--start", default="2004-09-06")
     parser.add_argument("--end", default="2025-12-31")
+    parser.add_argument("--fred", nargs="*", default=[], help="FRED series identifiers, e.g. DTB3")
     args = parser.parse_args(argv)
+    for sid in args.fred:
+        series = load_fred(sid, refresh=True)
+        print(f"FRED {sid}: {series.index.min().date()} to {series.index.max().date()}")
     if args.fx:
         rates = load_ecb_fx_rates(refresh=True)
         print(f"FX reference rates: {rates.index.min().date()} to {rates.index.max().date()}, cached in {cache_dir()}")
     if args.yield_curve:
         curve = load_ecb_svensson_parameters(args.start, args.end, refresh=True)
         print(f"Svensson parameters: {len(curve)} days, cached in {cache_dir()}")
-    if not (args.fx or args.yield_curve):
+    if not (args.fx or args.yield_curve or args.fred):
         parser.print_help()
 
 

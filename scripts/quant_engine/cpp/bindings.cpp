@@ -12,6 +12,7 @@
 #include "black_scholes.hpp"
 #include "finite_difference.hpp"
 #include "garch.hpp"
+#include "hedging.hpp"
 #include "heston.hpp"
 
 namespace py = pybind11;
@@ -270,6 +271,57 @@ PYBIND11_MODULE(_core, m) {
         py::arg("returns"), py::arg("window"), py::arg("refit_every"), py::arg("model") = "gjr",
         py::arg("dist") = "t", py::arg("alphas") = std::vector<double>{0.01, 0.025}, py::arg("n_threads") = 0,
         "Rolling one-step-ahead GARCH forecasts with filtered historical simulation VaR and ES.");
+
+    // ------------------------------------------------------------------ Hedging
+    m.def(
+        "hedge_simulation",
+        [](double S0, double K, double T, double r_dom, double r_for, const std::string& option_type, double sigma_price,
+           double sigma_hedge, int n_steps, int rebalance_every, double cost_rate, const std::string& dynamics, double mu,
+           double sigma, const DoubleArray& heston, const DoubleArray& garch, const DoubleArray& residuals,
+           long long n_paths, std::uint64_t seed, int n_threads) {
+            qe::HedgeContract c;
+            c.S0 = S0; c.K = K; c.T = T; c.r_dom = r_dom; c.r_for = r_for;
+            c.is_call = parse_option_type(option_type);
+            c.sigma_price = sigma_price; c.sigma_hedge = sigma_hedge;
+            c.n_steps = n_steps; c.rebalance_every = rebalance_every; c.cost_rate = cost_rate;
+            qe::HedgeDynamics d;
+            d.mu = mu;
+            d.sigma = sigma;
+            if (dynamics == "gbm") {
+                d.kind = qe::Dynamics::GBM;
+            } else if (dynamics == "heston") {
+                const auto hp = to_vector(heston);
+                if (hp.size() != 5) throw py::value_error("heston must be (v0, kappa, theta, sigma, rho)");
+                d.kind = qe::Dynamics::Heston;
+                d.heston = heston_params(hp[0], hp[1], hp[2], hp[3], hp[4]);
+            } else if (dynamics == "garch_fhs") {
+                const auto gp = to_vector(garch);
+                if (gp.size() != 6) throw py::value_error("garch must be (mu, omega, alpha, gamma, beta, var0) in percent units");
+                d.kind = qe::Dynamics::GarchFhs;
+                d.g_mu = gp[0]; d.g_omega = gp[1]; d.g_alpha = gp[2]; d.g_gamma = gp[3]; d.g_beta = gp[4]; d.g_var0 = gp[5];
+                d.residuals = to_vector(residuals);
+            } else {
+                throw py::value_error("dynamics must be 'gbm', 'heston' or 'garch_fhs'");
+            }
+            qe::HedgeResult res;
+            {
+                py::gil_scoped_release release;
+                res = qe::simulate_hedge(c, d, n_paths, seed, n_threads);
+            }
+            py::dict out;
+            out["pnl"] = to_array(res.pnl);
+            out["costs"] = to_array(res.costs);
+            out["final_spot"] = to_array(res.final_spot);
+            out["premium"] = res.premium;
+            return out;
+        },
+        py::arg("S0"), py::arg("K"), py::arg("T"), py::arg("r_dom"), py::arg("r_for"), py::arg("option_type"),
+        py::arg("sigma_price"), py::arg("sigma_hedge"), py::arg("n_steps"), py::arg("rebalance_every"),
+        py::arg("cost_rate"), py::arg("dynamics"), py::arg("mu") = 0.0, py::arg("sigma") = 0.1,
+        py::arg("heston") = std::vector<double>{}, py::arg("garch") = std::vector<double>{},
+        py::arg("residuals") = std::vector<double>{}, py::arg("n_paths") = 100000, py::arg("seed") = 12345,
+        py::arg("n_threads") = 0,
+        "P&L of a short European option delta-hedged in discrete time under GBM, Heston or GARCH-FHS dynamics.");
 
     m.def(
         "garch_simulate",

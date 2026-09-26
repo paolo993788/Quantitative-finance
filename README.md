@@ -1,42 +1,50 @@
 # Quantitative Finance
 
-Implementations and research notes on quantitative finance, covering derivatives pricing, stochastic modeling, volatility forecasting and risk measurement.
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![C++](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)
+![pybind11](https://img.shields.io/badge/bindings-pybind11-5C6BC0)
+![Tests](https://img.shields.io/badge/tests-pytest-0A9EDC?logo=pytest&logoColor=white)
+![Data](https://img.shields.io/badge/data-ECB%20%7C%20FRED-2E7D32)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-## Scope
+**Derivatives pricing, hedging and market-risk analytics with a C++17 engine driven from Python notebooks, validated against published benchmarks and applied to official European Central Bank data.**
 
-The repository is organized around the following topics:
+The repository answers questions that a derivatives desk, a market-risk function or a corporate treasury actually face: how to price and hedge an option sold to a client, how much a hedged position can lose, whether a VaR model passes regulatory backtesting, and how much capital a trading book requires under FRTB. Numerically intensive parts (Monte Carlo, finite differences, Fourier integration, hundreds of maximum-likelihood fits) run in C++; analysis, validation and reporting stay in Python.
 
-- **Derivatives pricing**: Black–Scholes, Heston and SABR models, with closed-form, Monte Carlo and finite-difference methods, and model calibration.
-- **Stochastic processes**: Brownian motion, jump-diffusion and Lévy processes for modeling asset returns.
-- **Volatility modeling**: GARCH-family models and deep-learning approaches, such as LSTM networks, for volatility forecasting.
-- **Risk measurement**: Value at Risk and Expected Shortfall, together with the backtesting of risk models.
-- **Machine learning in finance**: data-driven methods such as deep hedging.
+## Highlights
 
-## Repository layout
-
-```text
-.
-├── scripts/     One folder per project, each with its own README
-├── notebooks/   Jupyter notebooks, grouped by topic
-├── docs/        Project README template and publishing workflow
-├── data/        Small synthetic or publicly redistributable datasets (data/examples/)
-├── outputs/     Generated results, not tracked by Git
-└── tests/       Automated checks
-```
-
-Folders are created when their first content is added.
+| Area | What is done | Key result |
+| --- | --- | --- |
+| FX options desk (case study) | Price and delta-hedge a six-month EUR/USD option sold to an Italian exporter, with dynamics estimated on ECB data | A constant-volatility model understates the 97.5% ES of the hedged position by a factor of about 4 compared with filtered historical simulation; the quote is set by a cost-of-capital rule on the simulated tail |
+| Market risk and capital | One-day 99% VaR and 97.5% ES of a currency book on ECB reference rates, 1999-2025, with regulatory backtests and FRTB capital | Filtered historical simulation passes every test (1.12% exceptions, Z2 about 0); historical simulation fails (red zone in 2008); FRTB charge about 9% of the book versus 22% under Basel 2.5, stressed period April 2008 - March 2009 |
+| Option pricing engines | Black-Scholes, Crank-Nicolson with PSOR for American options, Heston by Fourier inversion and QE Monte Carlo, calibration | Heston price matches the Fang-Oosterlee (2008) benchmark to 2e-8; second-order convergence of Crank-Nicolson; C++ Monte Carlo about 7x faster than vectorised NumPy |
+| Engineering | pybind11 extension, parallel and thread-independent random streams, NumPy reference implementations | 60 automated tests with justified tolerances; results identical for any number of threads |
 
 ## Catalogue
 
-| Item | Type | Description |
+| Item | Business question | Data |
 | --- | --- | --- |
-| [`scripts/quant_engine`](scripts/quant_engine/README.md) | Python + C++ library | C++17 engines exposed with pybind11: Black-Scholes, Crank-Nicolson (European and American), Heston Fourier and QE Monte Carlo, GARCH/GJR-GARCH estimation and rolling VaR/ES; NumPy reference implementations, backtests and ECB data loaders. |
-| [`notebooks/derivatives_pricing/heston_pricing_and_calibration.ipynb`](notebooks/derivatives_pricing/heston_pricing_and_calibration.ipynb) | Notebook | Validation of the pricing engines against closed forms and published benchmarks, Heston smiles and calibration, American puts, discounting with the ECB AAA yield curve. |
-| [`notebooks/risk_measurement/fx_garch_var_backtesting.ipynb`](notebooks/risk_measurement/fx_garch_var_backtesting.ipynb) | Notebook | One-day 99% VaR and 97.5% ES of a euro investor's currency portfolio on ECB reference rates: historical simulation, GARCH-N, GJR-t and filtered historical simulation with Kupiec, Christoffersen, traffic-light and Acerbi-Szekely backtests. |
+| [`scripts/quant_engine`](scripts/quant_engine/README.md) (library) | Reusable C++/Python engines for pricing, hedging simulation, GARCH risk models, backtests and regulatory capital | ECB, FRED loaders |
+| [FX option desk: pricing and hedging](notebooks/case_studies/fx_option_desk_hedging.ipynb) | Which volatility should the desk quote for a EUR call / USD put sold to an exporter, how should it hedge, and how large is the model risk? | ECB EUR/USD, ECB AAA curve, US Treasury bill (FRED) |
+| [FX market risk and FRTB capital](notebooks/risk_measurement/fx_garch_var_backtesting.ipynb) | Does a GARCH-based VaR/ES model pass regulatory backtests, and how much capital does the book need under FRTB and Basel 2.5? | ECB reference rates for USD, GBP, JPY, CHF |
+| [Heston pricing and calibration](notebooks/derivatives_pricing/heston_pricing_and_calibration.ipynb) | Are the pricing engines accurate and fast enough for production-style calibration, and what drives the smile? | ECB AAA yield curve |
+
+Each notebook states its assumptions, fixes its random seeds, validates the numbers it relies on and ends with conclusions and limitations. Figures and tables are written to `outputs/`.
+
+## Architecture
+
+```text
+notebooks/  ──►  quant_engine (Python)                  ──►  quant_engine._core (C++17, pybind11)
+                 data loaders (ECB, FRED)                     Black-Scholes, implied volatility
+                 NumPy/SciPy reference implementations        Crank-Nicolson + PSOR (American options)
+                 calibration, backtests, capital              Heston Fourier + QE Monte Carlo
+                 reporting                                    GJR-GARCH MLE, rolling VaR/ES (parallel)
+                                                              discrete delta-hedging simulator
+```
 
 ## Getting started
 
-The notebooks run in Visual Studio Code (with the *Python*, *Jupyter* and *C/C++* extensions) or in Jupyter. The numerical engines are written in C++ and compiled into a Python extension, so a C++17 compiler is required (Visual Studio Build Tools on Windows, Xcode Command Line Tools on macOS, GCC or Clang on Linux). From the repository root:
+Requirements: Python 3.10 or later and a C++17 compiler (Visual Studio Build Tools on Windows, Xcode Command Line Tools on macOS, GCC or Clang on Linux). From the repository root:
 
 ```bash
 python -m venv .venv
@@ -46,20 +54,40 @@ python -m pip install -e scripts/quant_engine
 python -m pytest tests/quant_engine
 ```
 
-Then open a notebook and select the `.venv` environment as kernel. The notebooks download official data from the European Central Bank on first use; see the [project README](scripts/quant_engine/README.md) for details and for the offline mode.
+Open a notebook in Visual Studio Code (extensions *Python*, *Jupyter* and *C/C++*) and select the `.venv` environment as kernel. Official data are downloaded and cached on first use; set `QUANT_ENGINE_DATA_MODE=synthetic` to work offline. Details, methods and the full validation table are in the [project README](scripts/quant_engine/README.md).
+
+## Repository layout
+
+```text
+.
+├── scripts/quant_engine/   C++ engine (cpp/), Python package, build and dependency files
+├── notebooks/              case_studies/, derivatives_pricing/, risk_measurement/
+├── tests/quant_engine/     validation suite (pytest)
+├── docs/                   project README template and publishing workflow
+├── data/                   download cache (ignored by Git) and small examples
+└── outputs/                generated figures and tables (ignored by Git)
+```
+
+## Roadmap
+
+SABR and local volatility calibration to FX and equity smiles; jump-diffusion and Lévy models; LSTM volatility forecasts benchmarked against GARCH; deep hedging with transaction costs; CVA for the FX option case study.
 
 ## Conventions
 
 - Each project documents its purpose, inputs, outputs and exact run command, following the [project README template](docs/script-template.md).
 - Model assumptions, parameter values, calibration data, conventions and sources are stated explicitly.
 - Numerical methods are validated against closed-form solutions or published benchmarks, with justified tolerances.
-- Simulations use a fixed, documented random seed.
+- Simulations use a fixed, documented random seed and report Monte Carlo standard errors.
 - Market data is committed only when its license allows redistribution; otherwise, the repository provides the code to download it.
 - Paths are relative to the repository root, and no credentials or confidential data are ever committed.
 
 ## Development workflow
 
 Changes follow the [publishing workflow](docs/publishing.md). The [`CLAUDE.md`](CLAUDE.md) file provides project instructions for [Claude Code](https://claude.com/claude-code), so that AI-assisted contributions meet the same standards.
+
+## Disclaimer
+
+Research and educational code. Results depend on the stated assumptions and are not investment advice or a validated production model.
 
 ## License
 

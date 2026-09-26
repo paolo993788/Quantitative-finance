@@ -130,3 +130,59 @@ def backtest_table(returns: pd.Series, forecasts: dict, alpha: float, es_forecas
             row["ES Z2"] = acerbi_szekely_z2(aligned.iloc[:, 0], aligned.iloc[:, 1], es, alpha)
         rows[name] = row
     return pd.DataFrame(rows).T
+
+
+# --------------------------------------------------------------------------- regulatory capital
+
+# Multiplication factors by number of 99% VaR exceptions in the last 250 days.
+# FRTB internal models approach (Basel Committee, MAR99): 1.5 in the green zone,
+# 1.70-1.92 in the amber zone, 2.0 in the red zone.
+FRTB_MULTIPLIER = {5: 1.70, 6: 1.76, 7: 1.83, 8: 1.88, 9: 1.92}
+# Basel 2.5 / 1996 framework: 3 plus the plus factor of the traffic light.
+BASEL25_MULTIPLIER = {5: 3.40, 6: 3.50, 7: 3.65, 8: 3.75, 9: 3.85}
+
+
+def frtb_multiplier(exceptions_250: int) -> float:
+    if exceptions_250 <= 4:
+        return 1.5
+    return FRTB_MULTIPLIER.get(exceptions_250, 2.0)
+
+
+def basel25_multiplier(exceptions_250: int) -> float:
+    if exceptions_250 <= 4:
+        return 3.0
+    return BASEL25_MULTIPLIER.get(exceptions_250, 4.0)
+
+
+def overlapping_returns(returns: pd.Series, horizon: int) -> pd.Series:
+    """Sum of `horizon` consecutive daily log-returns, labelled with the last day."""
+    return returns.rolling(horizon).sum().dropna()
+
+
+def historical_es(sample, alpha=0.025):
+    """Historical-simulation VaR and ES (positive losses) of a return sample."""
+    x = np.asarray(sample, dtype=float)
+    q = np.quantile(x, alpha)
+    return -q, -x[x <= q].mean()
+
+
+def rolling_historical_es(returns: pd.Series, horizon=10, window=250, alpha=0.025) -> pd.DataFrame:
+    """ES and VaR of `horizon`-day overlapping returns over a trailing window of `window` days."""
+    h = overlapping_returns(returns, horizon)
+    values = [historical_es(h.iloc[i - window:i], alpha) for i in range(window, len(h) + 1)]
+    return pd.DataFrame(values, index=h.index[window - 1:], columns=["var", "es"])
+
+
+def stressed_period(returns: pd.Series, horizon=10, window=250, alpha=0.025):
+    """Twelve-month window with the largest horizon-day ES (FRTB stressed calibration)."""
+    rolling = rolling_historical_es(returns, horizon, window, alpha)
+    end = rolling["es"].idxmax()
+    h = overlapping_returns(returns, horizon)
+    start = h.index[h.index.get_loc(end) - window + 1]
+    return {"start": start, "end": end, "es": float(rolling.loc[end, "es"]), "var": float(rolling.loc[end, "var"])}
+
+
+def capital_charge(series: pd.Series, multiplier: float, averaging_days=60) -> float:
+    """max(latest value, multiplier x average of the last `averaging_days` values)."""
+    s = series.dropna()
+    return float(max(s.iloc[-1], multiplier * s.iloc[-averaging_days:].mean()))
