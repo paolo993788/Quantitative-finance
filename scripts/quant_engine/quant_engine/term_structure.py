@@ -203,15 +203,21 @@ def fit_dns_kalman(yields: pd.DataFrame, lam0: float = DIEBOLD_LI_LAMBDA, common
     """Maximum-likelihood estimation of the state-space DNS model, started from the two-step estimates.
 
     BFGS is restarted from its own solution until the log-likelihood improves by less than `tol`, first with its
-    default forward-difference gradients and then, to polish the optimum, with central differences (step 1e-5);
-    a restart is kept only if it improves the likelihood. `converged` reports whether the largest
-    central-difference gradient component is below `grad_tol`. The polish matters for that diagnostic: forward
-    differences (step about 1.5e-8) carry rounding noise of order 1e-2 in the gradient, as large as `grad_tol`,
-    so without it the flag depended on the last digits of the likelihood. Forward differences are kept for the
-    first rounds because central differences that straddle the excluded region stall the line search.
+    default forward-difference gradients and then with central differences (step 1e-5); a restart is kept only if
+    it improves the likelihood. Newton steps with the numerical Hessian (step 1e-4, as for the standard errors)
+    and a halving line search then finish the polish while the Hessian is positive definite. `converged` reports
+    whether the largest central-difference gradient component is below `grad_tol`.
+
+    The polish matters for that diagnostic. Forward differences (step about 1.5e-8) carry rounding noise of order
+    1e-2 in the gradient, as large as `grad_tol`, and near the optimum BFGS stalls once the likelihood changes
+    are at rounding level, where it stops depends on the last digits of the inputs (different BLAS kernels were
+    enough to flip the flag). Newton steps converge quadratically at an interior optimum and bring the gradient
+    to rounding level. Forward differences are kept for the first rounds because central differences that
+    straddle the excluded region stall the line search.
+
     Non-stationary factor dynamics, decays outside (0.02, 5) per year and measurement standard deviations below
-    0.01 bp are excluded. With `common_h` one measurement variance is shared by all
-    maturities, which rules out the degenerate optimum where some maturities are observed without error.
+    0.01 bp are excluded. With `common_h` one measurement variance is shared by all maturities, which rules out
+    the degenerate optimum where some maturities are observed without error.
     """
     maturities = yields.columns.to_numpy(dtype=float)
     Y = yields.to_numpy(dtype=float)
@@ -245,11 +251,40 @@ def fit_dns_kalman(yields: pd.DataFrame, lam0: float = DIEBOLD_LI_LAMBDA, common
                 theta, best = res.x, res.fun
             if improvement < tol:
                 break
+    for _ in range(max_rounds):
+        grad = gradient(theta)
+        if np.max(np.abs(grad)) < 0.1 * grad_tol:
+            break
+        H = _hessian(objective, theta, 1e-4)
+        try:
+            np.linalg.cholesky(H)
+        except np.linalg.LinAlgError:
+            break   # not a proper interior optimum (for example the degenerate fit with free variances)
+        direction = -np.linalg.solve(H, grad)
+        for t in 0.5 ** np.arange(12):
+            value = objective(theta + t * direction)
+            if value <= best:
+                theta, best = theta + t * direction, value
+                break
+        else:
+            break
     grad = gradient(theta)
     model = DNSModel.unpack(theta, maturities)
     model.loglik = -float(best)
     model.converged = bool(np.max(np.abs(grad)) < grad_tol)
     return model
+
+
+def _hessian(f, theta, step: float) -> np.ndarray:
+    """Central-difference Hessian of f at theta, with the four-point formula on and off the diagonal."""
+    k = theta.size
+    H = np.zeros((k, k))
+    eye = np.eye(k) * step
+    for i in range(k):
+        for j in range(i, k):
+            H[i, j] = H[j, i] = (f(theta + eye[i] + eye[j]) - f(theta + eye[i] - eye[j])
+                                 - f(theta - eye[i] + eye[j]) + f(theta - eye[i] - eye[j])) / (4 * step ** 2)
+    return H
 
 
 def parameter_names(maturities, common_h: bool = False) -> list[str]:
@@ -265,17 +300,11 @@ def dns_standard_errors(model: DNSModel, yields, step: float = 1e-4) -> pd.Serie
     log-likelihood (central differences). The standard error of lambda itself is lambda x se(log lambda)."""
     Y = np.asarray(yields, dtype=float)
     theta = model.pack()
-    k = theta.size
 
     def f(th):
         return kalman_filter(DNSModel.unpack(th, model.maturities), Y, keep_states=False)["loglik"]
 
-    H = np.zeros((k, k))
-    eye = np.eye(k) * step
-    for i in range(k):
-        for j in range(i, k):
-            H[i, j] = H[j, i] = (f(theta + eye[i] + eye[j]) - f(theta + eye[i] - eye[j])
-                                 - f(theta - eye[i] + eye[j]) + f(theta - eye[i] - eye[j])) / (4 * step ** 2)
+    H = _hessian(f, theta, step)
     cov = np.linalg.pinv(-H)
     se = np.sqrt(np.where(np.diag(cov) > 0, np.diag(cov), np.nan))
     return pd.Series(se, index=parameter_names(model.maturities, model.common_h), name="standard error")
