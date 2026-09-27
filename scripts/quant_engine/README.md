@@ -10,6 +10,9 @@ A C++17 library exposed to Python with pybind11, used by the notebooks of this r
   - macOS: Xcode Command Line Tools (`xcode-select --install`);
   - Linux: GCC 9 or later, or Clang 10 or later.
 - Python dependencies: [`requirements.txt`](requirements.txt) (NumPy, SciPy, pandas, Matplotlib, pybind11, pytest, ipykernel). No other C++ libraries are needed.
+- Development tools: [`requirements-dev.txt`](requirements-dev.txt) (ruff, nbconvert).
+- Exact versions: [`requirements-lock.txt`](requirements-lock.txt) pins the two files above to versions that pass the test suite and execute every notebook (Python 3.11, Linux). CI installs it on Python 3.11 and the unpinned files on 3.10 and 3.12.
+- For the standalone C++ tests: CMake 3.16 or later (Ninja optional).
 
 ## Usage
 
@@ -22,7 +25,7 @@ python -m pip install -r scripts/quant_engine/requirements.txt
 python -m pip install -e scripts/quant_engine
 ```
 
-The last command compiles `cpp/bindings.cpp` into the extension module `quant_engine._core` and installs the package in editable mode. After editing any C++ file, run it again to rebuild.
+For the exact environment used by CI, install `requirements-lock.txt` instead of `requirements.txt`. The last command compiles `cpp/bindings.cpp` into the extension module `quant_engine._core` and installs the package in editable mode. After editing any C++ file, run it again to rebuild.
 
 ### Visual Studio Code
 
@@ -35,7 +38,12 @@ The last command compiles `cpp/bindings.cpp` into the extension module `quant_en
 
 ```bash
 python -m pytest tests/quant_engine                           # validation suite
+ruff check --select F scripts tests                           # lint (pyflakes rules)
 python -m quant_engine.data --fx --yield-curve --fred DTB3    # optional: pre-download the official data
+
+# Standalone C++ tests (strict warnings; add -DQE_SANITIZE=address,undefined or =thread)
+cmake -S scripts/quant_engine/cpp -B build/cpp -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build/cpp && ctest --test-dir build/cpp --output-on-failure
 ```
 
 ### Notebooks
@@ -140,6 +148,58 @@ Run `python -m pytest tests/quant_engine` from the repository root (83 tests, ab
 | Hedge optimisation: minimax value equals the worst scenario, larger feasible sets never do worse, NII limit respected | $10^{-6}$ |
 
 The notebooks repeat the main validations on the data used (for example the convergence study of Crank-Nicolson and the bias study of the QE scheme).
+
+## C++ unit tests and sanitizers
+
+**Tests.** The engines are header-only, so [`cpp/CMakeLists.txt`](cpp/CMakeLists.txt) also compiles them without Python. It uses `-Wall -Wextra -Wpedantic -Wshadow -Wold-style-cast -Wnull-dereference -Wdouble-promotion -Werror` (`/W4 /WX` with MSVC) and bounds-checked standard containers outside Release builds. [`cpp/tests/test_core.cpp`](cpp/tests/test_core.cpp) runs 1,180 checks without any test framework. The Python suite compares the engines with independent NumPy and SciPy implementations; these tests add published values, exact identities, thread invariance and argument validation on the C++ code alone:
+
+| Check | Tolerance |
+| --- | --- |
+| SplitMix64 and xoshiro256** against the published reference outputs | exact |
+| Uniform, normal and gamma variates: range, mean, variance, 5% two-sided tail frequency | 4 standard errors |
+| `parallel_for`: same result for 1, 3 and 8 threads; an exception in a task is rethrown | exact |
+| Black-Scholes against Hull (10.4506; Example 15.6: 4.76 and 0.81) | half a unit in the last published digit |
+| Put-call parity, parity of the Greeks, Greeks as central differences of the price, no-arbitrage bounds, zero volatility and zero time | $10^{-12}S$; $10^{-6}$ (truncation $O(h^2)$) |
+| Implied volatility: repricing on 90 cases, volatility where the vega exceeds $10^{-3}$, NaN outside the no-arbitrage bounds | $10^{-11}$; $10^{-7}$; exact |
+| Crank-Nicolson (400 x 400) price, delta and gamma vs closed form; error cut at least 16 times from 100 to 400 nodes | $10^{-4}$, $5\times10^{-5}$, $10^{-6}$ |
+| American put vs a Cox-Ross-Rubinstein tree (mean of 4,000 and 4,001 steps); value above the payoff; exercise boundary below the strike and monotone in maturity; American call without dividends equals the European | $2\times10^{-4}$; exact; $10^{-6}$ |
+| Heston characteristic function: $\varphi(0)=1$, martingale $\varphi(-i)=e^{(r-q)T}$, conjugate symmetry; 16-point Gauss-Legendre exact to degree 31 | $10^{-13}$; $10^{-14}$ |
+| Heston vs Fang and Oosterlee (2008) 5.785155450; vanishing vol of vol vs Black-Scholes; bounds; parameter validation | $2\times10^{-8}$; $10^{-5}$; exact |
+| QE Monte Carlo vs Fourier (calls, puts, forward); put-call parity of the estimates; 1 vs 5 threads | 4 standard errors plus 0.01; $10^{-9}$; bitwise |
+| $\ln\Gamma$ vs `std::lgamma`; Nelder-Mead on the Rosenbrock function | $10^{-12}$; $10^{-5}$ |
+| GARCH likelihood with constant variance and with the GJR recursion written out; Student-t tending to the normal; reparametrisation round trip | $10^{-9}$; $10^{-3}$; $10^{-14}$ |
+| GJR-GARCH-t fit on 4,000 simulated returns: likelihood at least as high as at the true parameters; persistence, $\beta$, $\gamma$, $\nu$ | exact; 0.03, 0.05, 0.05, 3 |
+| Rolling GARCH forecasts: 1 vs 4 threads; expected shortfall above VaR; VaR falls with the tail probability; argument validation | bitwise; exact |
+| Delta hedging: unhedged mean P&L zero at the true volatility; daily hedge cuts the standard deviation below 15%; weekly vs daily ratio near $\sqrt{5}$; P&L falls by exactly the reported costs, path by path; Heston and GARCH-FHS dynamics identical for 1 and 3 threads | 4 standard errors; ratio in (1.9, 2.6); $10^{-10}$; bitwise |
+| Nelson-Siegel loadings at one month and 1,000 years | $10^{-13}$ |
+| Kalman filter (Woodbury form) vs a dense Kalman filter with missing values and an empty date: log-likelihood and filtered states; a non-positive-definite prior gives $-\infty$; argument validation | relative $10^{-9}$; $10^{-10}$; exact |
+
+**Mutation check.** Seven deliberate bugs were injected into the engines, and each makes the suite fail:
+
+- the sign of the interest term in the call theta;
+- the original Heston characteristic function instead of the "little trap" form;
+- projected SOR without the early-exercise constraint;
+- transaction costs not charged to the hedger's cash;
+- the Kalman covariance update skipped;
+- the GJR leverage term applied after positive shocks (in the likelihood and, separately, in the simulator);
+- the expected shortfall of filtered historical simulation replaced by the VaR.
+
+The leverage bug was missed until the written-out GJR recursion and the check on the fitted leverage coefficient were added. A control mutation that seeds the Monte Carlo streams differently, but still independently of the thread count, correctly passes.
+
+**Sanitizers.** The same tests pass under two sanitizer builds:
+
+- AddressSanitizer with UndefinedBehaviorSanitizer (`-DQE_SANITIZE=address,undefined`): out-of-bounds access, use after free, signed overflow and similar;
+- ThreadSanitizer (`-DQE_SANITIZE=thread`): data races in the parallel Monte Carlo, hedging and rolling-GARCH loops.
+
+CI runs both, plus GCC and Clang builds with warnings as errors.
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It needs no credentials and downloads no market data. Its jobs:
+
+1. **Python:** lint (ruff, pyflakes rules) and the test suite, on Python 3.11 with the locked versions and on 3.10 and 3.12 with the newest allowed versions.
+2. **C++:** the standalone tests with GCC and Clang (warnings as errors), and with GCC under ASan/UBSan and under TSan.
+3. **Notebooks:** every Python notebook executed offline on synthetic data. The job checks that the data cache stays empty, i.e. that synthetic mode does not touch the network.
 
 ## References
 
