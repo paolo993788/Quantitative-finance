@@ -75,7 +75,7 @@ def ns_loadings(maturities, lam: float = DIEBOLD_LI_LAMBDA) -> np.ndarray:
     """Nelson-Siegel loadings [level, slope, curvature] for maturities in years."""
     tau = np.maximum(np.asarray(maturities, dtype=float), 1e-10)
     x = lam * tau
-    slope = (1.0 - np.exp(-x)) / x
+    slope = -np.expm1(-x) / x   # (1 - e^{-x}) / x without cancellation for small x
     return np.column_stack([np.ones_like(tau), slope, slope - np.exp(-x)])
 
 
@@ -202,10 +202,15 @@ def fit_dns_kalman(yields: pd.DataFrame, lam0: float = DIEBOLD_LI_LAMBDA, common
                    max_rounds: int = 10, tol: float = 1e-6, grad_tol: float = 1e-2) -> DNSModel:
     """Maximum-likelihood estimation of the state-space DNS model, started from the two-step estimates.
 
-    BFGS with numerical gradients is restarted from its own solution until the log-likelihood improves by
-    less than `tol`; `converged` reports whether the largest central-difference gradient component is below
-    `grad_tol`. Non-stationary factor dynamics, decays outside (0.02, 5) per year and measurement standard
-    deviations below 0.01 bp are excluded. With `common_h` one measurement variance is shared by all
+    BFGS is restarted from its own solution until the log-likelihood improves by less than `tol`, first with its
+    default forward-difference gradients and then, to polish the optimum, with central differences (step 1e-5);
+    a restart is kept only if it improves the likelihood. `converged` reports whether the largest
+    central-difference gradient component is below `grad_tol`. The polish matters for that diagnostic: forward
+    differences (step about 1.5e-8) carry rounding noise of order 1e-2 in the gradient, as large as `grad_tol`,
+    so without it the flag depended on the last digits of the likelihood. Forward differences are kept for the
+    first rounds because central differences that straddle the excluded region stall the line search.
+    Non-stationary factor dynamics, decays outside (0.02, 5) per year and measurement standard deviations below
+    0.01 bp are excluded. With `common_h` one measurement variance is shared by all
     maturities, which rules out the degenerate optimum where some maturities are observed without error.
     """
     maturities = yields.columns.to_numpy(dtype=float)
@@ -226,17 +231,21 @@ def fit_dns_kalman(yields: pd.DataFrame, lam0: float = DIEBOLD_LI_LAMBDA, common
         ll = kalman_filter(model, Y, keep_states=False)["loglik"]
         return -ll if np.isfinite(ll) else 1e12
 
+    def gradient(theta, step=1e-5):
+        return np.array([(objective(theta + e) - objective(theta - e)) / (2 * step)
+                         for e in step * np.eye(theta.size)])
+
     theta = start.pack()
     best = objective(theta)
-    for _ in range(max_rounds):
-        res = optimize.minimize(objective, theta, method="BFGS", options={"gtol": 1e-6, "maxiter": 5000})
-        improvement = best - res.fun
-        if res.fun <= best:
-            theta, best = res.x, res.fun
-        if improvement < tol:
-            break
-    step = 1e-5 * np.eye(theta.size)
-    grad = np.array([(objective(theta + e) - objective(theta - e)) / 2e-5 for e in step])   # central differences
+    for jac in (None, gradient):   # forward differences (SciPy's default), then the central-difference polish
+        for _ in range(max_rounds):
+            res = optimize.minimize(objective, theta, jac=jac, method="BFGS", options={"gtol": 1e-6, "maxiter": 5000})
+            improvement = best - res.fun
+            if res.fun <= best:
+                theta, best = res.x, res.fun
+            if improvement < tol:
+                break
+    grad = gradient(theta)
     model = DNSModel.unpack(theta, maturities)
     model.loglik = -float(best)
     model.converged = bool(np.max(np.abs(grad)) < grad_tol)

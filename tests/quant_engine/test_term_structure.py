@@ -17,6 +17,10 @@ def test_nelson_siegel_loadings_limits_and_curvature_peak():
     L = ts.ns_loadings([1e-8, 1e4], ts.DIEBOLD_LI_LAMBDA)
     np.testing.assert_allclose(L[0], [1.0, 1.0, 0.0], atol=1e-7)
     np.testing.assert_allclose(L[1], [1.0, 0.0, 0.0], atol=1e-3)
+    # Short end to second order, (1 - e^{-x}) / x = 1 - x/2 + O(x^2): expm1 avoids the cancellation of 1 - e^{-x},
+    # which would leave an error of about eps / x = 3e-9 at x = 6e-8.
+    x = ts.DIEBOLD_LI_LAMBDA * 1e-8
+    np.testing.assert_allclose(L[0], [1.0, 1.0 - x / 2, x / 2], rtol=0, atol=1e-15)
     grid = np.linspace(0.1, 10, 100_000)
     peak = grid[np.argmax(ts.ns_loadings(grid)[:, 2])]
     assert peak * 12 == pytest.approx(29.4, abs=0.1)   # about 30 months (Diebold and Li, 2006)
@@ -119,6 +123,12 @@ def test_maximum_likelihood_recovers_simulated_parameters():
         name = ["level", "slope", "curvature"][i]
         assert abs(model.A[i, i] - A[i, i]) < 4 * se[f"A {name}<-{name}"]
     assert model.converged
+    # The convergence diagnostic does not hinge on rounding: perturbing the data by 1e-12 (relative) still
+    # converges and moves the estimates by less than 1e-4, a hundredth of their standard errors. Before the
+    # central-difference polish, a change of this size in the last digits of the likelihood flipped the flag.
+    perturbed = ts.fit_dns_kalman(Y * (1 + 1e-12), lam0=0.5)
+    assert perturbed.converged
+    np.testing.assert_allclose(perturbed.pack(), model.pack(), atol=1e-4)
     common = ts.fit_dns_kalman(Y, lam0=0.5, common_h=True)   # true measurement errors are equal across maturities
     assert common.converged and common.common_h
     assert common.h[0] == pytest.approx(0.03, rel=0.1)

@@ -70,7 +70,7 @@ inline std::vector<double> ns_loadings(const std::vector<double>& maturities, do
     std::vector<double> L(maturities.size() * 3);
     for (std::size_t i = 0; i < maturities.size(); ++i) {
         const double x = lam * std::max(maturities[i], 1e-10);
-        const double slope = (1.0 - std::exp(-x)) / x;
+        const double slope = -std::expm1(-x) / x;  // (1 - e^{-x}) / x without cancellation for small x
         L[i * 3] = 1.0;
         L[i * 3 + 1] = slope;
         L[i * 3 + 2] = slope - std::exp(-x);
