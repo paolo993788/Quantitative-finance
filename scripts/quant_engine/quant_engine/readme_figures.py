@@ -18,7 +18,7 @@ import pandas as pd
 
 from . import banking_book, curves, data, garch, hedging, risk, synthetic
 from . import term_structure as ts
-from .figstyle import end_label, header, label_offsets, new_figure, point_label, render
+from .figstyle import header, new_figure, point_label, render
 
 # Settings shared with the notebooks (FX option desk case study and FX risk notebook).
 VALUATION_DATE, NOTIONAL_EUR, TENOR_DAYS, COST_RATE = "2025-12-31", 10_000_000, 126, 0.5e-4
@@ -192,7 +192,7 @@ def var_exceptions(t, d):
     ax.set_ylim(0, max(ex.to_numpy().max() * 1.2, 12))
     ax.yaxis.set_major_locator(__import__("matplotlib").ticker.MaxNLocator(integer=True))
     ax.legend(loc="upper right")
-    fhs, hs = ex.columns[1], ex.columns[0]
+    fhs = ex.columns[1]
     title = ("Filtered historical simulation stays out of the red zone" if not (ex[fhs] >= 10).any()
              else "Exceptions of the one-day 99% VaR by year")
     header(fig, t, title,

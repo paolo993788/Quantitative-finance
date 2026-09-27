@@ -1,5 +1,6 @@
 # Quantitative Finance
 
+[![CI](https://github.com/paolo993788/Quantitative-finance/actions/workflows/ci.yml/badge.svg)](https://github.com/paolo993788/Quantitative-finance/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![C++](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)
 ![R](https://img.shields.io/badge/R-4.2%2B-276DC3?logo=r&logoColor=white)
@@ -20,7 +21,7 @@ The repository answers questions that a derivatives desk, a market-risk function
 | Market risk and capital | One-day 99% VaR and 97.5% ES of a currency book on ECB reference rates, 1999-2025, with regulatory backtests and FRTB capital | Filtered historical simulation passes every test (1.12% exceptions, Z2 about 0); historical simulation fails (red zone in 2008); FRTB charge about 9% of the book versus 22% under Basel 2.5, stressed period April 2008 - March 2009 |
 | Yield curve and IRRBB (case study) | ECB AAA curve 2004-2025: PCA, dynamic Nelson-Siegel by two-step OLS and by Kalman-filter maximum likelihood in C++, recursive forecasts with Diebold-Mariano tests; EVE and NII of a stylised bank under the six BCBS scenarios with the EBA floor and outlier tests; minimax swap hedges by linear programming | No model beats the random walk over 2015-2025 (it wins in the negative-rate years, loses mildly in 2022-2025); the unhedged bank loses 46% of Tier 1 in the parallel-up scenario (limit 15%); a hedge fitted to the six scenarios alone fails on history (18.5% loss in the worst year), while one fitted to scenarios and history keeps the worst loss at 5.8% with two swaps |
 | Option pricing engines | Black-Scholes, Crank-Nicolson with PSOR for American options, Heston by Fourier inversion and QE Monte Carlo, calibration | Heston price matches the Fang-Oosterlee (2008) benchmark to 2e-8; second-order convergence of Crank-Nicolson; C++ Monte Carlo about 7x faster than vectorised NumPy |
-| Engineering | pybind11 extension, parallel and thread-independent random streams, NumPy reference implementations | 83 automated tests with justified tolerances; results identical for any number of threads; the C++ Kalman filter is about 100 times faster than NumPy |
+| Engineering | pybind11 extension, parallel and thread-independent random streams, NumPy reference implementations | 83 Python tests with justified tolerances; 1,180 C++ checks built with warnings as errors and run under AddressSanitizer, UndefinedBehaviorSanitizer and ThreadSanitizer; results identical for any number of threads; CI on every pull request, including an offline run of every notebook; pinned lock file; the C++ Kalman filter is about 100 times faster than NumPy |
 
 ## Charts
 
@@ -88,6 +89,8 @@ python -m pip install -e scripts/quant_engine
 python -m pytest tests/quant_engine
 ```
 
+For the exact versions used by CI, install `scripts/quant_engine/requirements-lock.txt` instead of `requirements.txt`. The standalone C++ tests and sanitizer builds are described in the [library README](scripts/quant_engine/README.md#c-unit-tests-and-sanitizers).
+
 Open a notebook in Visual Studio Code (extensions *Python*, *Jupyter* and *C/C++*) and select the `.venv` environment as kernel. Official data are downloaded and cached on first use; set `QUANT_ENGINE_DATA_MODE=synthetic` to work offline. Details, methods and the full validation table are in the [project README](scripts/quant_engine/README.md).
 
 The notebooks are stored with the outputs of a full run on official data (September 2026), so tables and charts can be read directly on GitHub. The R notebooks in [`notebooks/r_crosschecks/`](notebooks/r_crosschecks/README.md) recompute the main results with independent R packages; they need R 4.2 or later: run `Rscript notebooks/r_crosschecks/install_packages.R` once and select the **R** kernel.
@@ -119,7 +122,7 @@ Arbitrage-free Nelson-Siegel and shadow-rate term-structure models; behavioural 
 
 ## Development workflow
 
-Changes follow the [publishing workflow](docs/publishing.md). The [`CLAUDE.md`](CLAUDE.md) file provides project instructions for [Claude Code](https://claude.com/claude-code), so that AI-assisted contributions meet the same standards.
+Changes follow the [publishing workflow](docs/publishing.md). Every pull request runs the [CI workflow](.github/workflows/ci.yml): lint, the Python tests on Python 3.10-3.12, the C++ tests with GCC and Clang and under sanitizers, and every notebook offline on synthetic data. The [`CLAUDE.md`](CLAUDE.md) file provides project instructions for [Claude Code](https://claude.com/claude-code), so that AI-assisted contributions meet the same standards.
 
 ## Disclaimer
 
