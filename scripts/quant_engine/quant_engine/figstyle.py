@@ -31,12 +31,15 @@ THEMES = {
 }
 
 WIDTH, DPI = 10.0, 150
+# A neo-grotesque sans stack: the first family installed is used (Liberation Sans and FreeSans are metric clones of
+# Arial and Helvetica available on most Linux systems); DejaVu Sans, bundled with matplotlib, is the last resort.
+SANS = ["Inter", "Helvetica Neue", "Helvetica", "Arial", "Liberation Sans", "FreeSans", "DejaVu Sans"]
 
 
 def rc(t: dict) -> dict:
     return {
         "figure.facecolor": t["surface"], "axes.facecolor": t["surface"], "savefig.facecolor": t["surface"],
-        "font.family": "sans-serif", "font.size": 10,
+        "font.family": "sans-serif", "font.sans-serif": SANS, "font.size": 10,
         "text.color": t["ink"], "axes.labelcolor": t["ink2"], "xtick.color": t["muted"], "ytick.color": t["muted"],
         "xtick.labelcolor": t["ink2"], "ytick.labelcolor": t["ink2"],
         "axes.edgecolor": t["axis"], "axes.linewidth": 0.8, "axes.grid": True, "axes.grid.axis": "y",
@@ -134,16 +137,78 @@ ORDINAL = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"]   # one hue, l
 
 
 def notebook_style(dpi: int = 110) -> None:
-    """Matplotlib defaults for the notebooks: the light theme of the README charts (validated categorical
-    order, solid hairline grid behind the marks, no top or right spine, frameless legends, left-aligned
-    titles) and constrained layout, so that legends placed outside the axes, for example with
-    ``fig.legend(loc="outside lower center")``, never overlap titles, labels or data."""
+    """Matplotlib defaults for the notebooks, matching the README charts.
+
+    - validated categorical order, never cycled;
+    - neo-grotesque sans type with a clear hierarchy: a bold headline (see `headline`), a lighter subtitle, panel
+      titles and axis text in secondary ink;
+    - solid hairline grid behind the marks, no top, right or left spine, no tick marks;
+    - 1.5 pt lines, a thin surface-coloured edge on every bar and patch so that touching fills are separated by a
+      gap rather than an outline;
+    - frameless legends and constrained layout, so that legends placed outside the axes, for example with
+      ``fig.legend(loc="outside lower center")``, and direct labels never overlap titles, labels or data.
+    """
     import matplotlib as mpl
 
     params = rc(NOTEBOOK)
-    params.update({"figure.dpi": dpi, "figure.constrained_layout.use": True, "axes.titlesize": 11,
-                   "axes.titlelocation": "left", "axes.titlepad": 8, "legend.fontsize": 8.5})
+    params.update({
+        "figure.dpi": dpi, "figure.constrained_layout.use": True,
+        "figure.constrained_layout.h_pad": 0.06, "figure.constrained_layout.w_pad": 0.06,
+        "figure.titlesize": 13, "figure.titleweight": "bold",
+        "axes.titlesize": 10.5, "axes.titlelocation": "left", "axes.titlepad": 8, "axes.titlecolor": NOTEBOOK["ink2"],
+        "axes.labelsize": 9, "xtick.labelsize": 8.5, "ytick.labelsize": 8.5,
+        "legend.fontsize": 8.5, "legend.handlelength": 1.4, "legend.columnspacing": 1.6,
+        "lines.linewidth": 1.5, "patch.force_edgecolor": True, "patch.edgecolor": NOTEBOOK["surface"],
+        "patch.linewidth": 1.0,
+    })
     mpl.rcParams.update(params)
+
+
+def headline(ax, title: str, subtitle: str | None = None) -> None:
+    """Bold takeaway title and a lighter subtitle (what is plotted, in which units), left-aligned above `ax`.
+
+    Both are artists of the axes, so constrained layout reserves room for them. Keep the subtitle to one line.
+    """
+    pad = 8.0
+    if subtitle:
+        ax.annotate(subtitle, (0, 1), xycoords="axes fraction", xytext=(0, 7), textcoords="offset points",
+                    ha="left", va="bottom", fontsize=9.5, color=NOTEBOOK["ink2"], annotation_clip=False)
+        pad = 7 + 9.5 * 1.3 + 6
+    ax.set_title(title, loc="left", fontsize=12.5, fontweight="bold", color=NOTEBOOK["ink"], pad=pad)
+
+
+def figure_headline(fig, title: str) -> None:
+    """Bold takeaway title over a multi-panel figure; the panel titles say what each panel shows."""
+    fig.suptitle(title, x=0.01, ha="left", fontsize=13, fontweight="bold", color=NOTEBOOK["ink"])
+
+
+def label_ends(ax, series: dict, colors: dict, fmt=None, min_gap: float = 12.0) -> None:
+    """Direct labels at the right end of line series.
+
+    `series` maps a name to a pandas Series; each label is a dot with a surface ring on the last point and the name
+    (and, with `fmt`, the last value) in neutral ink. Labels are spread vertically to at least `min_gap` points.
+    """
+    names = list(series)
+    ends = [(series[n].index[-1], float(series[n].iloc[-1])) for n in names]
+    offsets = label_offsets(ax, [y for _, y in ends], min_gap=min_gap)
+    for name, (x, y), dy in zip(names, ends, offsets):
+        text = name if fmt is None else f"{name}  {fmt(y)}"
+        end_label(ax, NOTEBOOK, x, y, text, colors[name], dy=dy)
+
+
+def label_bar_segments(ax, bars, values, fmt, min_value: float) -> None:
+    """Value labels centred inside horizontal bar segments that are wide enough (`values` >= `min_value`), in
+    white or ink according to the luminance of the fill; smaller segments are left to the legend and the table."""
+    from matplotlib.colors import to_rgb
+
+    for bar, value in zip(bars, values):
+        if value < min_value:
+            continue
+        r, g, b = (c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in to_rgb(bar.get_facecolor()))
+        luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        ink = NOTEBOOK["ink"] if luminance > 0.18 else "white"
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_y() + bar.get_height() / 2, fmt(value), ha="center",
+                va="center", fontsize=8, color=ink)
 
 
 def ordinal_colors(n: int) -> list:
