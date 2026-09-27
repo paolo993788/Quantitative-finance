@@ -1,0 +1,118 @@
+# Continuous integration: lint, Python tests, standalone C++ tests (strict warnings and sanitizers) and an offline
+# smoke test of every Python notebook on synthetic data. No credentials are needed and no market data is downloaded.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} (${{ matrix.deps }} dependencies)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.11"
+            deps: locked       # the exact versions of requirements-lock.txt
+          - python: "3.10"
+            deps: latest       # newest versions allowed by requirements.txt: catches upstream breakage early
+          - python: "3.12"
+            deps: latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: scripts/quant_engine/requirements*.txt
+      - name: Install dependencies and build the C++ extension
+        run: |
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.deps }}" = "locked" ]; then
+            python -m pip install -r scripts/quant_engine/requirements-lock.txt
+          else
+            python -m pip install -r scripts/quant_engine/requirements.txt -r scripts/quant_engine/requirements-dev.txt
+          fi
+          python -m pip install -e scripts/quant_engine
+      - name: Lint (pyflakes rules)
+        run: ruff check --select F scripts tests
+      - name: Tests
+        run: python -m pytest tests/quant_engine -q -rs
+
+  cpp:
+    name: C++ ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc
+            cxx: g++
+            sanitize: ""
+          - name: clang
+            cxx: clang++
+            sanitize: ""
+          - name: gcc-asan-ubsan
+            cxx: g++
+            sanitize: address,undefined
+          - name: gcc-tsan
+            cxx: g++
+            sanitize: thread
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Reduce ASLR entropy for the sanitizers
+        if: matrix.sanitize != ''
+        # Recent kernels use 32 bits of mmap randomisation, which the sanitizer runtimes of GCC 13 cannot map around.
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Configure (warnings are errors)
+        run: >
+          cmake -S scripts/quant_engine/cpp -B build/cpp -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DQE_SANITIZE=${{ matrix.sanitize }}
+      - name: Build
+        run: cmake --build build/cpp
+      - name: Unit tests
+        run: ctest --test-dir build/cpp --output-on-failure
+
+  notebooks:
+    name: Notebooks (synthetic data, offline)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scripts/quant_engine/requirements*.txt
+      - name: Install locked dependencies and build the C++ extension
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r scripts/quant_engine/requirements-lock.txt
+          python -m pip install -e scripts/quant_engine
+      - name: Execute every Python notebook on synthetic data
+        env:
+          QUANT_ENGINE_DATA_MODE: synthetic
+          QUANT_ENGINE_DATA_DIR: ${{ runner.temp }}/no-data
+          MPLBACKEND: Agg
+        run: |
+          set -euo pipefail
+          for nb in $(git ls-files 'notebooks/*.ipynb' | grep -v '^notebooks/r_crosschecks/'); do
+            echo "::group::$nb"
+            jupyter nbconvert --to notebook --execute --output-dir "$RUNNER_TEMP/executed" \
+              --ExecutePreprocessor.timeout=1200 "$nb"
+            echo "::endgroup::"
+          done
+          # Synthetic mode must not touch the network: the data cache stays empty.
+          test "$(find "$RUNNER_TEMP/no-data" -type f 2>/dev/null | wc -l)" -eq 0
