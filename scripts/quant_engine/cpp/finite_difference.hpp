@@ -117,15 +117,18 @@ inline FdResult bs_finite_difference(double S0, double K, double T, double r, do
                 ++res.psor_iterations;
                 if (max_change < psor_tol * K) break;
             }
-            // Critical price: edge of the region where V equals the payoff.
+            // Critical price: edge of the region where V equals the payoff, searched over the interior nodes
+            // only (the Dirichlet values at j = 0 and j = M equal the payoff by construction, so they would
+            // report the grid edge as a boundary when early exercise is never optimal). NaN when no interior
+            // node is in the exercise region.
             double boundary = std::numeric_limits<double>::quiet_NaN();
             const double tol = 1e-9 * K;
             if (is_call) {
-                for (int j = M; j >= 0; --j) {
+                for (int j = M - 1; j >= 1; --j) {
                     if (payoff[j] > 0.0 && V[j] - payoff[j] < tol) boundary = S[j]; else if (payoff[j] > 0.0) break;
                 }
             } else {
-                for (int j = 0; j <= M; ++j) {
+                for (int j = 1; j < M; ++j) {
                     if (payoff[j] > 0.0 && V[j] - payoff[j] < tol) boundary = S[j]; else if (payoff[j] > 0.0) break;
                 }
             }

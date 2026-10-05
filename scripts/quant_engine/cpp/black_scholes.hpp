@@ -84,17 +84,20 @@ inline double bs_implied_vol(double price, double S, double K, double T, double 
     // Brenner-Subrahmanyam style starting point, kept inside the bracket.
     double sigma = std::sqrt(2.0 * std::abs(std::log(S * df_q / (K * df_r))) / T);
     sigma = std::clamp(std::max(sigma, 0.2), lo, hi);
+    const double target = tol * std::max(1.0, price);
     for (int it = 0; it < max_iter; ++it) {
         const BSResult res = bs_price_greeks(S, K, T, r, q, sigma, is_call);
         const double diff = res.price - price;
-        if (std::abs(diff) < tol * std::max(1.0, price)) return sigma;
+        if (std::abs(diff) < target) return sigma;
         if (diff > 0.0) hi = sigma; else lo = sigma;
         double candidate = res.vega > 1e-300 ? sigma - diff / res.vega : 0.5 * (lo + hi);
         if (!(candidate > lo && candidate < hi)) candidate = 0.5 * (lo + hi);
-        if (std::abs(candidate - sigma) < 1e-15) return candidate;
+        if (std::abs(candidate - sigma) < 1e-15) break;   // the bracket has collapsed
         sigma = candidate;
     }
-    return sigma;
+    // Not converged (for example a price that needs a volatility below the 1e-9 bracket): NaN rather than a
+    // volatility that reprices far from the input.
+    return std::abs(bs_price(S, K, T, r, q, sigma, is_call) - price) < target ? sigma : nan;
 }
 
 }  // namespace qe

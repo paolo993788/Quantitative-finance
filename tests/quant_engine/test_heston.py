@@ -26,6 +26,24 @@ def test_matches_scipy_quadrature(K, T, r, q):
     assert cpp == pytest.approx(reference, abs=1e-9)
 
 
+@pytest.mark.filterwarnings("ignore::scipy.integrate.IntegrationWarning")   # the reference quadrature's own estimate
+@pytest.mark.parametrize("T", [0.001, 1 / 365, 1 / 52])
+@pytest.mark.parametrize("v", [1e-4, 0.0064, 0.04])
+@pytest.mark.parametrize("moneyness", [0.7, 0.9, 1.1, 1.35])
+def test_short_maturities_away_from_the_money_match_scipy_quadrature(T, v, moneyness):
+    # The integrand oscillates with period 2 pi / |ln(S/K)| whatever the maturity, while the characteristic
+    # function decays on the scale 1 / sqrt(v T): with the panel width set by the decay alone, 16 nodes per panel
+    # under-sampled the oscillation at short maturities and returned prices such as -5.0 for a worthless call.
+    # Now the price matches the adaptive quadrature to 1e-9 of max(S, K) and respects the no-arbitrage bounds.
+    S, K = 100.0, 100.0 * moneyness
+    params = heston.HestonParams(v0=v, kappa=1.0, theta=v, sigma=0.01 if v < 1e-3 else 0.3, rho=-0.5)
+    price = heston.price(S, [K], T, 0.01, 0.0, params)[0]
+    reference = heston.call_price_reference(S, K, T, 0.01, 0.0, params)
+    assert price == pytest.approx(reference, abs=1e-9 * max(S, K))
+    assert -1e-12 * max(S, K) <= price <= S + 1e-12 * S
+    assert price >= max(S - K * np.exp(-0.01 * T), 0.0) - 1e-12 * max(S, K)
+
+
 def test_characteristic_function_matches_reference():
     u = np.linspace(-20, 20, 81) + 0.3j
     np.testing.assert_allclose(core.heston_cf(u, 1.3, 0.02, 0.01, *FO.as_tuple()),
@@ -87,5 +105,6 @@ def test_calibration_recovers_parameters():
     vols = heston.implied_vols(prices, 100.0, strikes, maturities, 0.02, 0.0)
     fit = heston.calibrate(100.0, strikes, maturities, 0.02, 0.0, vols,
                            heston.HestonParams(0.05, 1.0, 0.06, 0.4, -0.3))
+    assert fit.success
     assert fit.rmse_vol < 1e-6
     np.testing.assert_allclose(fit.params.as_tuple(), true.as_tuple(), rtol=1e-3, atol=1e-4)

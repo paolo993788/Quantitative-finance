@@ -246,6 +246,16 @@ void test_implied_volatility() {
     CHECK(std::isnan(qe::bs_implied_vol(0.5 * (100 - 90 * std::exp(-0.03)), 100, 90, 1, 0.03, 0, true)));
     CHECK(std::isnan(qe::bs_implied_vol(100.5, 100, 90, 1, 0.03, 0, true)));
     CHECK(std::isnan(qe::bs_implied_vol(-1.0, 100, 90, 1, 0.03, 0, true)));
+    // Prices inside the bounds that need a volatility below the 1e-9 bracket (an at-the-money call worth 1e-8
+    // has sigma = 2.5e-10) are not converged: NaN rather than the bracket end, which reprices to 4e-8.
+    CHECK(std::isnan(qe::bs_implied_vol(1e-8, 100, 100, 1, 0.0, 0.0, true)));
+    CHECK(std::isnan(qe::bs_implied_vol(1e-12, 100, 100, 1, 0.0, 0.0, true)));
+    // Every finite result reprices the input.
+    for (double price : {1e-6, 1e-3, 0.5, 3.0, 10.0}) {
+        const double iv = qe::bs_implied_vol(price, 100, 100, 1, 0.0, 0.0, true);
+        CHECK(std::isfinite(iv));
+        CHECK_CLOSE(qe::bs_price(100, 100, 1, 0.0, 0.0, iv, true), price, 1e-12 * std::max(1.0, price));
+    }
 }
 
 // ------------------------------------------------------------------------------------------------ finite differences
@@ -322,10 +332,25 @@ void test_finite_difference_american() {
     CHECK(below_strike);
     CHECK(monotone);
     CHECK(am.exercise_boundary.size() == am.tau_grid.size());
-    // Without dividends early exercise of a call is never optimal (Merton, 1973).
+    // Without dividends early exercise of a call is never optimal (Merton, 1973): the price equals the European
+    // one and no critical price is reported (the Dirichlet nodes, which equal the payoff, do not count).
     const qe::FdResult am_call = qe::bs_finite_difference(100, 100, 1.0, 0.05, 0.0, 0.3, true, true);
     const qe::FdResult eu_call = qe::bs_finite_difference(100, 100, 1.0, 0.05, 0.0, 0.3, true, false);
     CHECK_CLOSE(am_call.price, eu_call.price, 1e-6);
+    bool no_boundary = !am_call.exercise_boundary.empty();
+    for (double b : am_call.exercise_boundary) no_boundary = no_boundary && std::isnan(b);
+    CHECK(no_boundary);
+    // A put is never exercised early when the rate is negative and there is no yield (waiting earns on the strike).
+    const qe::FdResult am_put = qe::bs_finite_difference(100, 100, 1.0, -0.01, 0.0, 0.3, false, true);
+    const qe::FdResult eu_put = qe::bs_finite_difference(100, 100, 1.0, -0.01, 0.0, 0.3, false, false);
+    CHECK_CLOSE(am_put.price, eu_put.price, 1e-6);
+    no_boundary = !am_put.exercise_boundary.empty();
+    for (double b : am_put.exercise_boundary) no_boundary = no_boundary && std::isnan(b);
+    CHECK(no_boundary);
+    // With a dividend yield above the rate the call is exercised early: a finite boundary above the strike.
+    const qe::FdResult div_call = qe::bs_finite_difference(100, 100, 1.0, 0.03, 0.08, 0.3, true, true);
+    CHECK(div_call.price > qe::bs_price(100, 100, 1.0, 0.03, 0.08, 0.3, true) + 1e-3);
+    CHECK(std::isfinite(div_call.exercise_boundary.back()) && div_call.exercise_boundary.back() > 100.0);
 }
 
 // ------------------------------------------------------------------------------------------------ Heston
@@ -492,11 +517,15 @@ void test_garch_simulation_and_fit() {
     // The optimiser must do at least as well as the true parameters (the maximum likelihood estimate is the best
     // fit to this sample), and the estimates are close to the truth for 4,000 observations.
     CHECK(fit.nll <= qe::garch_nll(r.data(), r.size(), truth, spec) + 1e-6);
+    CHECK(fit.converged);
     CHECK(fit.params.persistence() < 1.0);
-    CHECK_CLOSE(fit.params.persistence(), truth.persistence(), 0.03);
-    CHECK_CLOSE(fit.params.beta, truth.beta, 0.05);
-    CHECK_CLOSE(fit.params.gamma, truth.gamma, 0.05);  // leverage: larger response to negative shocks
-    CHECK_CLOSE(fit.params.nu, truth.nu, 3.0);
+    // Tolerances are about three asymptotic standard errors on 4,000 observations of this process (inverse
+    // numerical Hessian, as computed by garch.fit in Python on samples of the same size): persistence 0.006,
+    // beta 0.02, gamma 0.02, nu 0.7 (the tail index is the least precisely estimated parameter).
+    CHECK_CLOSE(fit.params.persistence(), truth.persistence(), 0.02);
+    CHECK_CLOSE(fit.params.beta, truth.beta, 0.06);
+    CHECK_CLOSE(fit.params.gamma, truth.gamma, 0.06);  // leverage: larger response to negative shocks
+    CHECK_CLOSE(fit.params.nu, truth.nu, 2.1);
     qe::GarchParams explosive = truth;
     explosive.beta = 0.99;
     CHECK(throws_invalid_argument([&] { qe::garch_simulate(explosive, spec, 10, 1); }));
@@ -567,7 +596,31 @@ void test_hedging_pnl() {
     CHECK(sd_of(daily.pnl) < 0.15 * sd_of(u.pnl));
     const double ratio = sd_of(weekly.pnl) / sd_of(daily.pnl);
     CHECK(ratio > 1.9 && ratio < 2.6);
-    CHECK_CLOSE(mean_of(daily.pnl), 0.0, 4.0 * sd_of(daily.pnl) / std::sqrt(static_cast<double>(n)) + 0.01);
+    // With the risk-neutral drift the discounted hedged P&L is a martingale, so its mean is exactly zero even with
+    // discrete rebalancing: four standard errors and nothing else.
+    CHECK_CLOSE(mean_of(daily.pnl), 0.0, 4.0 * sd_of(daily.pnl) / std::sqrt(static_cast<double>(n)));
+    // The same contract as a put: premium from the closed form, the unhedged P&L equals the premium minus the
+    // discounted put payoff path by path, zero mean, and the daily hedge cuts the dispersion as for the call.
+    qe::HedgeContract put = atm_call();
+    put.is_call = false;
+    qe::HedgeContract unhedged_put = put;
+    unhedged_put.rebalance_every = 0;
+    const qe::HedgeResult up = qe::simulate_hedge(unhedged_put, gbm, n, 17, 4);
+    CHECK_CLOSE(up.premium, qe::bs_price(100, 100, 0.5, 0.03, 0.01, 0.2, false), 1e-14);
+    bool put_identity = true;
+    for (std::size_t i = 0; i < up.pnl.size(); ++i)
+        put_identity = put_identity && std::abs(up.pnl[i] - (up.premium - std::exp(-0.03 * 0.5) *
+                                                              std::max(100.0 - up.final_spot[i], 0.0))) < 1e-12;
+    CHECK(put_identity);
+    CHECK_CLOSE(mean_of(up.pnl), 0.0, 4.0 * sd_of(up.pnl) / std::sqrt(static_cast<double>(n)));
+    const qe::HedgeResult daily_put = qe::simulate_hedge(put, gbm, n, 17, 4);
+    CHECK(sd_of(daily_put.pnl) < 0.15 * sd_of(up.pnl));
+    CHECK_CLOSE(mean_of(daily_put.pnl), 0.0, 4.0 * sd_of(daily_put.pnl) / std::sqrt(static_cast<double>(n)));
+    // Put-call parity of the hedged positions: the same paths and the same hedge ratios up to the forward, so
+    // the call and put P&L differ only through the sign of the forward position (identical to rounding).
+    bool parity = true;
+    for (std::size_t i = 0; i < daily.pnl.size(); ++i) parity = parity && std::abs(daily.pnl[i] - daily_put.pnl[i]) < 1e-9;
+    CHECK(parity);
     // Costs do not change the simulated paths or the hedge ratios: the P&L falls by exactly the discounted costs.
     qe::HedgeContract costly = atm_call();
     costly.cost_rate = 0.0005;
@@ -578,6 +631,30 @@ void test_hedging_pnl() {
         identity = identity && std::abs(without.pnl[i] - with_costs.pnl[i] - with_costs.costs[i]) < 1e-10 &&
                    without.costs[i] == 0.0 && with_costs.costs[i] > 0.0;
     CHECK(identity);
+    // Delta band: a zero band is the time-based policy (bitwise); a band wider than any possible move keeps the
+    // initial hedge until maturity, so the costs are the initial trade plus the liquidation of delta_0 units
+    // (grown at the foreign rate) at the final spot, discounted; a moderate band trades less than the time-based
+    // policy and more than the static one, and so lies between them in costs and in hedging error.
+    qe::HedgeContract banded = costly;
+    banded.delta_band = 0.0;
+    const qe::HedgeResult same = qe::simulate_hedge(banded, gbm, 2000, 23, 2);
+    CHECK(same.pnl == with_costs.pnl && same.costs == with_costs.costs);
+    banded.delta_band = 10.0;
+    const qe::HedgeResult fixed = qe::simulate_hedge(banded, gbm, 2000, 23, 2);
+    const double delta0 = qe::bs_price_greeks(100, 100, 0.5, 0.03, 0.01, 0.2, true).delta;
+    bool static_costs = true;
+    for (std::size_t i = 0; i < fixed.costs.size(); ++i) {
+        const double expected = 0.0005 * delta0 * 100.0 +
+                                0.0005 * delta0 * std::exp(0.01 * 0.5) * fixed.final_spot[i] * std::exp(-0.03 * 0.5);
+        static_costs = static_costs && std::abs(fixed.costs[i] - expected) < 1e-12;
+    }
+    CHECK(static_costs);
+    banded.delta_band = 0.05;
+    const qe::HedgeResult moderate = qe::simulate_hedge(banded, gbm, 2000, 23, 2);
+    CHECK(mean_of(fixed.costs) < mean_of(moderate.costs) && mean_of(moderate.costs) < mean_of(with_costs.costs));
+    CHECK(sd_of(with_costs.pnl) < sd_of(moderate.pnl) && sd_of(moderate.pnl) < sd_of(fixed.pnl));
+    banded.delta_band = -0.1;
+    CHECK(throws_invalid_argument([&] { qe::simulate_hedge(banded, gbm, 10, 1); }));
 }
 
 void test_hedging_dynamics_and_threads() {
@@ -594,9 +671,11 @@ void test_hedging_dynamics_and_threads() {
     qe::Xoshiro256 rng(3);
     fhs.residuals.resize(1000);
     for (auto& v : fhs.residuals) v = rng.normal();
+    qe::HedgeContract daily_steps = atm_call();
+    daily_steps.n_steps = 126;   // the GARCH recursion is daily: 126 trading days in half a year
     for (const qe::HedgeDynamics& d : {heston, fhs}) {
-        const qe::HedgeResult one = qe::simulate_hedge(atm_call(), d, 5000, 41, 1);
-        const qe::HedgeResult many = qe::simulate_hedge(atm_call(), d, 5000, 41, 3);
+        const qe::HedgeResult one = qe::simulate_hedge(daily_steps, d, 5000, 41, 1);
+        const qe::HedgeResult many = qe::simulate_hedge(daily_steps, d, 5000, 41, 3);
         CHECK(one.pnl == many.pnl && one.final_spot == many.final_spot);
         bool finite = true;
         for (double v : one.pnl) finite = finite && std::isfinite(v);
@@ -604,7 +683,9 @@ void test_hedging_dynamics_and_threads() {
     }
     qe::HedgeDynamics empty = fhs;
     empty.residuals.clear();
-    CHECK(throws_invalid_argument([&] { qe::simulate_hedge(atm_call(), empty, 10, 1); }));
+    CHECK(throws_invalid_argument([&] { qe::simulate_hedge(daily_steps, empty, 10, 1); }));
+    // A step that is not one trading day is rejected for the daily GARCH recursion (125 steps in half a year).
+    CHECK(throws_invalid_argument([&] { qe::simulate_hedge(atm_call(), fhs, 10, 1); }));
     qe::HedgeContract bad = atm_call();
     bad.rebalance_every = -1;
     CHECK(throws_invalid_argument([&] { qe::simulate_hedge(bad, qe::HedgeDynamics{}, 10, 1); }));
@@ -752,11 +833,24 @@ void test_nelson_siegel_filter() {
     const qe::DnsKalmanResult fast = qe::dns_kalman_filter(Y, T, n, maturities, lam, mu, A, Q, h, P0, true);
     std::vector<double> filtered;
     const double dense = dense_dns_loglik(Y, T, n, L, mu, A, Q, h, P0, filtered);
-    // The Woodbury form and the dense form are the same filter: agreement to rounding error.
+    // The engine (sequential processing of the maturities, Joseph form) and the dense batch form are the same
+    // filter: agreement to rounding error.
     CHECK_CLOSE(fast.loglik, dense, 1e-9 * std::abs(dense));
     double max_diff = 0.0;
     for (std::size_t i = 0; i < filtered.size(); ++i) max_diff = std::max(max_diff, std::abs(fast.filtered[i] - filtered[i]));
     CHECK(max_diff < 1e-10);
+    // Measurement standard deviations at the 0.01 bp floor of the estimator (two maturities observed almost
+    // without error): the covariance form keeps full precision, whereas the information form P^{-1} + L' H^{-1} L
+    // lost the prior to rounding (errors of order 1e-3 in the log-likelihood).
+    std::vector<double> floor_h = h;
+    floor_h[1] = 1e-4;
+    floor_h[3] = 1e-4;
+    const qe::DnsKalmanResult tight = qe::dns_kalman_filter(Y, T, n, maturities, lam, mu, A, Q, floor_h, P0, true);
+    const double dense_tight = dense_dns_loglik(Y, T, n, L, mu, A, Q, floor_h, P0, filtered);
+    CHECK_CLOSE(tight.loglik, dense_tight, 1e-9 * std::abs(dense_tight));
+    max_diff = 0.0;
+    for (std::size_t i = 0; i < filtered.size(); ++i) max_diff = std::max(max_diff, std::abs(tight.filtered[i] - filtered[i]));
+    CHECK(max_diff < 1e-8);
     // On a date without observations the filtered state is the prediction.
     for (std::size_t i = 0; i < 3; ++i) CHECK(fast.filtered[20 * 3 + i] == fast.predicted[20 * 3 + i]);
     // Without keep_states only the likelihood is returned, unchanged.

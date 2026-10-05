@@ -140,20 +140,34 @@ class DNSModel:
         return cls(lam, mu, A, C @ C.T, h, np.asarray(maturities, dtype=float), common_h=common)
 
 
+STATIONARITY_BOUND = 0.9999   # largest admissible modulus of an eigenvalue of A (half-life of 6,900 months)
+DIFFUSE_PRIOR_VARIANCE = 1e4
+
+
+def is_stationary(A) -> bool:
+    """Whether every eigenvalue of the transition matrix has modulus below STATIONARITY_BOUND."""
+    return bool(np.all(np.isfinite(A))) and bool(np.max(np.abs(np.linalg.eigvals(A))) < STATIONARITY_BOUND)
+
+
 def _initial_state_covariance(A: np.ndarray, Q: np.ndarray) -> np.ndarray:
-    """Unconditional covariance of the factors when their dynamics are stationary, otherwise a diffuse prior."""
-    if np.all(np.abs(np.linalg.eigvals(A)) < 0.999):
+    """Unconditional covariance of the factors when their dynamics are stationary (`is_stationary`), otherwise
+    a diffuse prior. `fit_dns_kalman` excludes non-stationary dynamics with the same bound, so inside its
+    admissible region the prior, and hence the likelihood, is a continuous function of the parameters."""
+    if is_stationary(A):
         P = np.linalg.solve(np.eye(9) - np.kron(A, A), Q.ravel()).reshape(3, 3)
         return 0.5 * (P + P.T)
-    return np.eye(3) * 1e4
+    return np.eye(3) * DIFFUSE_PRIOR_VARIANCE
 
 
 def kalman_filter(model: DNSModel, yields, engine: str = "cpp", keep_states: bool = True) -> dict:
     """Kalman filter of the DNS model. The state starts from its unconditional distribution when
     the factor dynamics are stationary (otherwise from a diffuse prior). Missing values are skipped.
 
-    `engine="cpp"` uses the C++ filter of the extension (Woodbury update, 3 x 3 factorisations only);
-    `engine="numpy"` is the reference implementation with the textbook update.
+    Both engines use the covariance form with the Joseph update of the state covariance, which keeps full
+    precision when some measurement standard deviations are tiny or the prior is diffuse. `engine="cpp"` is the
+    filter of the extension, which assimilates the observed maturities one at a time (sequential processing,
+    exact for a diagonal measurement covariance); `engine="numpy"` is the reference implementation, which
+    factorises the innovation covariance S = L P L' + H of each date by Cholesky.
     """
     Y = np.asarray(yields, dtype=float)
     P0 = _initial_state_covariance(model.A, model.Q)
@@ -192,7 +206,8 @@ def kalman_filter(model: DNSModel, yields, engine: str = "cpp", keep_states: boo
             loglik -= 0.5 * (ok.sum() * math.log(2 * math.pi) + 2 * np.log(np.diag(cho)).sum() + w @ w)
             K = P @ Lt.T @ np.linalg.inv(S)
             x = x + K @ v
-            P = (np.eye(3) - K @ Lt) @ P
+            IKL = np.eye(3) - K @ Lt
+            P = IKL @ P @ IKL.T + K @ H[np.ix_(ok, ok)] @ K.T   # Joseph form
             P = 0.5 * (P + P.T)
         filtered[t] = x
     return {"loglik": float(loglik), "filtered": filtered, "predicted": predicted}
@@ -215,9 +230,10 @@ def fit_dns_kalman(yields: pd.DataFrame, lam0: float = DIEBOLD_LI_LAMBDA, common
     to rounding level. Forward differences are kept for the first rounds because central differences that
     straddle the excluded region stall the line search.
 
-    Non-stationary factor dynamics, decays outside (0.02, 5) per year and measurement standard deviations below
-    0.01 bp are excluded. With `common_h` one measurement variance is shared by all maturities, which rules out
-    the degenerate optimum where some maturities are observed without error.
+    Non-stationary factor dynamics (`is_stationary`, the bound used by the prior of the filter), decays outside
+    (0.02, 5) per year and measurement standard deviations below 0.01 bp are excluded. With `common_h` one
+    measurement variance is shared by all maturities, which rules out the degenerate optimum where some
+    maturities are observed without error.
     """
     maturities = yields.columns.to_numpy(dtype=float)
     Y = yields.to_numpy(dtype=float)
@@ -231,8 +247,7 @@ def fit_dns_kalman(yields: pd.DataFrame, lam0: float = DIEBOLD_LI_LAMBDA, common
 
     def objective(theta):
         model = DNSModel.unpack(theta, maturities)
-        if (not np.all(np.isfinite(model.A)) or np.max(np.abs(np.linalg.eigvals(model.A))) >= 1.0
-                or not 0.02 < model.lam < 5.0 or np.min(model.h) < 1e-4):
+        if not is_stationary(model.A) or not 0.02 < model.lam < 5.0 or np.min(model.h) < 1e-4:
             return 1e12
         ll = kalman_filter(model, Y, keep_states=False)["loglik"]
         return -ll if np.isfinite(ll) else 1e12

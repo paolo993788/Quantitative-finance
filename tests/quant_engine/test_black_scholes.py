@@ -58,3 +58,15 @@ def test_implied_vol_rejects_arbitrage_prices():
     iv = core.bs_implied_vol(np.array([0.0, 150.0]), 100, np.array([100.0, 100.0]), np.array([1.0, 1.0]),
                              np.array([0.0, 0.0]), 0.0, "call")
     assert np.isnan(iv).all()
+
+
+def test_implied_vol_is_nan_when_the_solver_cannot_converge():
+    # Inside the no-arbitrage bounds but needing a volatility below the 1e-9 end of the bracket (an at-the-money
+    # one-year call worth 1e-8 has sigma = 2.5e-10): NaN rather than the bracket end, which reprices to 4e-8.
+    prices = np.array([1e-8, 1e-12, 1e-6, 1e-3, 2.0, 25.0])
+    iv = core.bs_implied_vol(prices, 100.0, np.full(6, 100.0), np.ones(6), np.zeros(6), 0.0, "call")
+    assert np.isnan(iv[0]) and np.isnan(iv[1])
+    assert np.all(np.isfinite(iv[2:]))
+    for price, sigma in zip(prices[2:], iv[2:]):
+        assert core.bs_price_greeks(100, 100, 1, 0.0, 0.0, sigma, "call")["price"] == pytest.approx(price, rel=1e-12, abs=1e-12)
+    assert iv[5] == pytest.approx(ref.implied_vol(25.0, 100, 100, 1, 0.0, 0.0), rel=1e-9)

@@ -9,7 +9,10 @@
 // Trading rules for one short option:
 //   t = 0: receive the premium priced at vol `sigma_price`, buy the
 //          Black-Scholes delta computed at vol `sigma_hedge`;
-//   every `rebalance_every` simulation steps: rebalance to the new delta;
+//   every `rebalance_every` simulation steps: rebalance to the new delta,
+//          but only if it differs from the position held by more than
+//          `delta_band` (0 = always; a positive band is the move-based
+//          policy of Whalley and Wilmott, 1997, with a fixed half-width);
 //   the cash account accrues at r_dom and the underlying position accrues
 //   the foreign rate (units grow by exp(r_for dt));
 //   every trade in the underlying pays `cost_rate` times its value;
@@ -23,7 +26,10 @@
 //   GARCH-FHS: daily log returns r = mu_d + sigma_t z with z resampled from
 //              standardised residuals and GJR-GARCH(1,1) variance, inputs
 //              in percent as produced by the garch module (filtered
-//              historical simulation, Barone-Adesi et al., 1999).
+//              historical simulation, Barone-Adesi et al., 1999). The
+//              recursion is daily, so one step must be one trading day:
+//              n_steps must equal round(252 T), otherwise an exception is
+//              thrown (the GBM and Heston dynamics scale with dt).
 #pragma once
 
 #include <algorithm>
@@ -49,6 +55,7 @@ struct HedgeContract {
     double sigma_hedge = 0.1;  // volatility used to compute the hedge ratio
     int n_steps = 252;
     int rebalance_every = 1;   // 0 = unhedged
+    double delta_band = 0.0;   // trade only when |target delta - position| exceeds this (0 = at every rebalancing time)
     double cost_rate = 0.0;    // proportional cost per unit of value traded
 };
 
@@ -76,11 +83,14 @@ inline double bs_delta(double S, double K, double tau, double r, double q, doubl
 
 inline HedgeResult simulate_hedge(const HedgeContract& c, const HedgeDynamics& d, long long n_paths, std::uint64_t seed,
                                   int n_threads = 0) {
-    if (c.n_steps < 1 || n_paths < 1 || c.T <= 0.0 || c.S0 <= 0.0 || c.K <= 0.0 || c.rebalance_every < 0 || c.cost_rate < 0.0)
+    if (c.n_steps < 1 || n_paths < 1 || c.T <= 0.0 || c.S0 <= 0.0 || c.K <= 0.0 || c.rebalance_every < 0 || c.cost_rate < 0.0 ||
+        !(c.delta_band >= 0.0))
         throw std::invalid_argument("invalid hedging contract");
     if (d.kind == Dynamics::Heston) d.heston.validate();
     if (d.kind == Dynamics::GarchFhs && (d.residuals.empty() || !(d.g_var0 > 0.0)))
         throw std::invalid_argument("GARCH-FHS needs residuals and a positive initial variance");
+    if (d.kind == Dynamics::GarchFhs && std::abs(c.n_steps - 252.0 * c.T) > 0.5)
+        throw std::invalid_argument("GARCH-FHS dynamics are daily: n_steps must equal round(252 T) trading days");
 
     const double dt = c.T / c.n_steps;
     const double grow_for = std::exp(c.r_for * dt), grow_dom = std::exp(c.r_dom * dt);
@@ -148,10 +158,12 @@ inline HedgeResult simulate_hedge(const HedgeContract& c, const HedgeDynamics& d
                 if (step < c.n_steps && c.rebalance_every > 0 && step % c.rebalance_every == 0) {
                     const double target = bs_delta(S, c.K, c.T - step * dt, c.r_dom, c.r_for, c.sigma_hedge, c.is_call);
                     const double trade = target - units;
-                    const double trade_cost = c.cost_rate * std::abs(trade) * S;
-                    cash -= trade * S + trade_cost;
-                    total_cost += trade_cost * std::exp(-c.r_dom * step * dt);
-                    units = target;
+                    if (std::abs(trade) > c.delta_band) {
+                        const double trade_cost = c.cost_rate * std::abs(trade) * S;
+                        cash -= trade * S + trade_cost;
+                        total_cost += trade_cost * std::exp(-c.r_dom * step * dt);
+                        units = target;
+                    }
                 }
             }
             const double payoff = c.is_call ? std::max(S - c.K, 0.0) : std::max(c.K - S, 0.0);

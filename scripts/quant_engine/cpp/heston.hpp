@@ -94,8 +94,10 @@ inline const GaussLegendre& gauss_legendre_16() {
 //   C = (S e^{-qT} - K e^{-rT}) / 2
 //       + e^{-rT} / pi * Int_0^inf Re[ e^{i u k} (S phi(u - i) - K phi(u)) / (i u) ] du,
 // with k = ln(S / K) and phi the characteristic function of ln(S_T / S).
-// The integral is evaluated with composite 16-point Gauss-Legendre panels and
-// stops once several consecutive panels contribute less than abs_tol.
+// The integral is evaluated with composite 16-point Gauss-Legendre panels, whose
+// width resolves both the decay of the characteristic function and the
+// oscillation e^{iuk}, and stops once the frequency 4 / sqrt(v T) is passed and
+// four consecutive panels contribute less than abs_tol * max(S, K).
 inline double heston_call_price(double S, double K, double T, double r, double q, const HestonParams& p,
                                 double abs_tol = 1e-14) {
     p.validate();
@@ -110,14 +112,20 @@ inline double heston_call_price(double S, double K, double T, double r, double q
         return value.real();
     };
     const GaussLegendre& gl = gauss_legendre_16();
-    // Panel width scaled by the typical standard deviation of ln(S_T / S).
+    // Panel width: at most half the typical standard deviation of ln(S_T / S) in the frequency domain (the
+    // characteristic functions vary on the scale 1 / scale) and at most a quarter period of the oscillation
+    // e^{iuk}, whose period 2 pi / |k| is what limits the resolution for short maturities away from the money
+    // (16 Gauss-Legendre nodes integrate e^{iuk} over a quarter period to rounding error).
     const double scale = std::sqrt(std::max({p.v0, p.theta, 1e-4}) * T);
-    const double h = 0.5 / scale;
+    const double h = std::min(0.5 / scale, 0.5 * kPi / std::max(std::abs(k), 1e-300));
     const double tol = abs_tol * std::max(S, K);
+    // Integrate at least to u = 4 / scale, where the integrand has decayed, before the stopping rule may fire
+    // (with a small panel the contributions can be small at low frequencies without the tail being negligible).
+    const double u_min = 4.0 / scale;
     double integral = 0.0;
     int small_panels = 0;
-    for (int panel = 0; panel < 200000; ++panel) {
-        const double a = panel * h;
+    for (long long panel = 0; panel < 100000000LL; ++panel) {
+        const double a = static_cast<double>(panel) * h;
         double contribution = 0.0;
         for (std::size_t j = 0; j < gl.nodes.size(); ++j) {
             const double u = a + 0.5 * h * (gl.nodes[j] + 1.0);
@@ -126,7 +134,7 @@ inline double heston_call_price(double S, double K, double T, double r, double q
         contribution *= 0.5 * h;
         integral += contribution;
         small_panels = std::abs(contribution) < tol ? small_panels + 1 : 0;
-        if (small_panels >= 4) break;
+        if (small_panels >= 4 && a + h >= u_min) break;
     }
     const double df_r = std::exp(-r * T);
     return 0.5 * (S * std::exp(-q * T) - K * df_r) + df_r / kPi * integral;

@@ -91,3 +91,36 @@ def test_historical_es_and_stressed_window():
 def test_capital_charge_takes_the_larger_term():
     assert risk.capital_charge(pd.Series(np.full(60, 1.0)), 1.5) == pytest.approx(1.5)   # average term binds
     assert risk.capital_charge(pd.Series(np.r_[np.full(59, 1.0), 10.0]), 1.5) == pytest.approx(10.0)  # latest binds
+
+
+def test_backtest_table_combines_the_component_tests_on_aligned_data():
+    rng = np.random.default_rng(3)
+    idx = pd.bdate_range("2015-01-01", periods=2000)
+    returns = pd.Series(rng.standard_normal(2000), index=idx)
+    var, es = risk.normal_var_es(0.0, 1.0, 0.01)
+    forecasts = {"normal": pd.Series(var, index=idx)}
+    table = risk.backtest_table(returns, forecasts, 0.01, {"normal": pd.Series(es, index=idx)})
+    hits = (-returns > var).to_numpy()
+    pof, ind, cc = risk.kupiec_pof(hits, 0.01), risk.christoffersen_independence(hits), risk.conditional_coverage(hits, 0.01)
+    row = table.loc["normal"]
+    assert row["observations"] == 2000 and row["exceptions"] == hits.sum() and row["expected"] == pytest.approx(20.0)
+    assert row["exception rate"] == pytest.approx(hits.mean())
+    assert row["Kupiec p"] == pytest.approx(pof["p_value"]) and row["independence p"] == pytest.approx(ind["p_value"])
+    assert row["cond. coverage p"] == pytest.approx(cc["p_value"])
+    assert cc["lr"] == pytest.approx(pof["lr"] + ind["lr"]) and cc["p_value"] == pytest.approx(stats.chi2.sf(cc["lr"], 2))
+    assert row["ES Z2"] == pytest.approx(risk.acerbi_szekely_z2(-returns.to_numpy(), var, es, 0.01))
+    assert 8 <= row["exceptions"] <= 35 and row["Kupiec p"] > 0.001   # a correct model on 2,000 days
+    # Forecasts that start later, with missing values, and no ES: only dates with a return and a forecast count.
+    shorter = forecasts["normal"].iloc[100:].copy()
+    shorter.iloc[:10] = np.nan
+    partial = risk.backtest_table(returns, {"normal": shorter}, 0.01)
+    assert partial.loc["normal", "observations"] == 1890 and partial.loc["normal", "exceptions"] == hits[110:].sum()
+    assert "ES Z2" not in partial.columns
+
+
+def test_backtest_edge_cases():
+    none = risk.christoffersen_independence(np.zeros(100, dtype=bool))
+    assert none["lr"] == pytest.approx(0.0) and none["p_value"] == 1.0
+    assert risk.conditional_coverage(np.zeros(250, dtype=bool), 0.01)["lr"] == pytest.approx(-2 * 250 * np.log(0.99))
+    every = risk.kupiec_pof(np.ones(100, dtype=bool), 0.01)
+    assert every["rate"] == 1.0 and every["lr"] == pytest.approx(-2 * 100 * np.log(0.01)) and every["p_value"] < 1e-100

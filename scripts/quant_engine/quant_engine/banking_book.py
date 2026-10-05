@@ -9,8 +9,9 @@ balance sheet under the two parallel scenarios.
 Behavioural assumptions (stated, not estimated):
 
 * fixed-rate mortgages prepay at a constant rate (CPR 5% a year), scaled in each scenario by the
-  BCBS multipliers: 0.8 when rates rise in the parallel and steepener scenarios, 1.2 in the parallel
-  down and flattener scenarios, 1.0 in the short-rate scenarios;
+  BCBS (2016) Table 3 multipliers for fixed-rate loans subject to prepayment risk: 0.8 in the parallel
+  up, steepener and short-rates-up scenarios, 1.2 in the parallel down, flattener and short-rates-down
+  scenarios;
 * non-maturity deposits: 70% core, slotted evenly over 7 years (average maturity about 3.5 years,
   within the BCBS cap of 5 years for retail transactional deposits), 30% overnight;
 * floating-rate loans and central bank funding reprice every three months; equity and other assets
@@ -29,7 +30,7 @@ from . import term_structure as ts
 
 SCENARIOS = list(ts.bcbs_scenarios([1.0]))
 PREPAYMENT_MULTIPLIERS = {None: 1.0, "parallel up": 0.8, "parallel down": 1.2, "steepener": 0.8,
-                          "flattener": 1.2, "short rates up": 1.0, "short rates down": 1.0}
+                          "flattener": 1.2, "short rates up": 0.8, "short rates down": 1.2}   # BCBS (2016), Table 3
 OVERNIGHT = 1.0 / 365.0
 EVE_OUTLIER_THRESHOLD = 0.15   # decline in EVE above 15% of Tier 1 capital
 NII_OUTLIER_THRESHOLD = 0.05   # decline in NII above 5% of Tier 1 capital

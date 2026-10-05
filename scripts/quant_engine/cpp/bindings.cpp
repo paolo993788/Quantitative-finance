@@ -279,12 +279,13 @@ PYBIND11_MODULE(_core, m) {
         [](double S0, double K, double T, double r_dom, double r_for, const std::string& option_type, double sigma_price,
            double sigma_hedge, int n_steps, int rebalance_every, double cost_rate, const std::string& dynamics, double mu,
            double sigma, const DoubleArray& heston, const DoubleArray& garch, const DoubleArray& residuals,
-           long long n_paths, std::uint64_t seed, int n_threads) {
+           long long n_paths, std::uint64_t seed, int n_threads, double delta_band) {
             qe::HedgeContract c;
             c.S0 = S0; c.K = K; c.T = T; c.r_dom = r_dom; c.r_for = r_for;
             c.is_call = parse_option_type(option_type);
             c.sigma_price = sigma_price; c.sigma_hedge = sigma_hedge;
             c.n_steps = n_steps; c.rebalance_every = rebalance_every; c.cost_rate = cost_rate;
+            c.delta_band = delta_band;
             qe::HedgeDynamics d;
             d.mu = mu;
             d.sigma = sigma;
@@ -321,7 +322,7 @@ PYBIND11_MODULE(_core, m) {
         py::arg("cost_rate"), py::arg("dynamics"), py::arg("mu") = 0.0, py::arg("sigma") = 0.1,
         py::arg("heston") = std::vector<double>{}, py::arg("garch") = std::vector<double>{},
         py::arg("residuals") = std::vector<double>{}, py::arg("n_paths") = 100000, py::arg("seed") = 12345,
-        py::arg("n_threads") = 0,
+        py::arg("n_threads") = 0, py::arg("delta_band") = 0.0,
         "P&L of a short European option delta-hedged in discrete time under GBM, Heston or GARCH-FHS dynamics.");
 
     m.def(

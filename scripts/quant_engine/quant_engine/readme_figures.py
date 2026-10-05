@@ -11,6 +11,7 @@ Each figure is saved in a light and a dark variant; the README selects one with 
 from __future__ import annotations
 
 import argparse
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -32,25 +33,40 @@ REGIMES = {"2015-2021: negative rates": ("2015-01-01", "2021-12-31"), "2022-2025
 
 
 def _rates(official, T):
+    """EUR and USD rates at the tenor and the currencies whose official rate could not be loaded (then the
+    documented assumption is used, with a warning, and the figure's source line says so)."""
     if not official:
-        return ASSUMED_RATES["EUR"], ASSUMED_RATES["USD"]
+        return ASSUMED_RATES["EUR"], ASSUMED_RATES["USD"], []
+    assumed = []
     try:
         sv = data.load_ecb_svensson_parameters("2025-12-01", VALUATION_DATE)
         r_eur = float(curves.SvenssonCurve.from_series(sv.iloc[-1]).zero_rate(T))
-    except Exception:
-        r_eur = ASSUMED_RATES["EUR"]
+    except Exception as exc:   # network or parsing failure: the figure must not pass the assumption off as data
+        warnings.warn(f"ECB yield curve unavailable ({exc!r}): using the assumed EUR rate {100 * ASSUMED_RATES['EUR']:.1f}%")
+        r_eur, assumed = ASSUMED_RATES["EUR"], assumed + ["EUR"]
     try:
         r_usd = float(np.log1p(data.load_fred("DTB3", end=VALUATION_DATE).iloc[-1] / 100.0))
-    except Exception:
-        r_usd = ASSUMED_RATES["USD"]
-    return r_eur, r_usd
+    except Exception as exc:
+        warnings.warn(f"FRED DTB3 unavailable ({exc!r}): using the assumed USD rate {100 * ASSUMED_RATES['USD']:.1f}%")
+        r_usd, assumed = ASSUMED_RATES["USD"], assumed + ["USD"]
+    return r_eur, r_usd, assumed
+
+
+def source_line(official, assumed=()):
+    """Source caption of the FX figures; names any rate that is an assumption rather than official data."""
+    if not official:
+        return "Simulated rates, not market data"
+    line = "Source: ECB euro reference rates and AAA yield curve; US Treasury bill (FRED DTB3)"
+    if assumed:
+        line += "; assumed " + ", ".join(f"{c} rate {100 * ASSUMED_RATES[c]:.1f}%" for c in assumed) + " (download failed)"
+    return line
 
 
 def load(official=True, n_paths=200_000) -> dict:
     T = TENOR_DAYS / 252
     fx = (data.load_ecb_fx_rates(("USD",), end=VALUATION_DATE)["USD"].dropna() if official
           else synthetic.fx_rates(end=VALUATION_DATE)["USD"])
-    r_eur, r_usd = _rates(official, T)
+    r_eur, r_usd, assumed = _rates(official, T)
     spot = float(fx.iloc[-1])
     strike = spot * np.exp((r_usd - r_eur) * T)
     returns = 100 * np.log(fx).diff().dropna()
@@ -88,8 +104,7 @@ def load(official=True, n_paths=200_000) -> dict:
                         "Filtered historical simulation (GJR-GARCH)": gjr[f"fhs_var_{VAR_ALPHA:g}"]}, index=idx)
     hits = (-port.reindex(idx).to_numpy()[:, None] > var.to_numpy()).astype(int)
     out["exceptions"] = pd.DataFrame(hits, index=idx, columns=var.columns).groupby(idx.year).sum()
-    out["source"] = ("Source: ECB euro reference rates and AAA yield curve; US Treasury bill (FRED DTB3)" if official
-                     else "Simulated rates, not market data")
+    out["source"] = source_line(official, assumed)
     return out
 
 

@@ -34,6 +34,20 @@ def test_eve_by_position_adds_up_and_swaps_are_linear():
     assert one["parallel up"] > 0 > one["parallel down"]
 
 
+def test_prepayment_multipliers_are_the_bcbs_table():
+    # BCBS (2016), Interest rate risk in the banking book, Table 3: scenario multipliers for fixed-rate loans
+    # subject to prepayment risk. The short-rate scenarios use the same multipliers as the parallel ones.
+    assert bb.PREPAYMENT_MULTIPLIERS == {None: 1.0, "parallel up": 0.8, "parallel down": 1.2, "steepener": 0.8,
+                                         "flattener": 1.2, "short rates up": 0.8, "short rates down": 1.2}
+    assert set(bb.SCENARIOS) == set(bb.PREPAYMENT_MULTIPLIERS) - {None}
+    book = bb.BankBook()
+    base = book.positions(CURVE.zero_rate, None)["fixed-rate mortgages"][1]
+    for scenario, multiplier in bb.PREPAYMENT_MULTIPLIERS.items():
+        flows = book.positions(CURVE.zero_rate, scenario)["fixed-rate mortgages"][1]
+        # Faster prepayment front-loads the cash flows; the multiplier alone decides the direction.
+        assert np.sign(flows[:12].sum() - base[:12].sum()) == np.sign(multiplier - 1.0)
+
+
 def test_prepayment_multipliers_change_mortgage_cash_flows():
     book = bb.BankBook()
     base = book.positions(CURVE.zero_rate, None)["fixed-rate mortgages"][1]

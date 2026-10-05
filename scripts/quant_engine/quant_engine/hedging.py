@@ -24,18 +24,25 @@ def garman_kohlhagen(S, K, T, r_dom, r_for, sigma, option_type="call"):
 
 def simulate(S0, K, T, r_dom, r_for, sigma_price, sigma_hedge, option_type="call", n_steps=126, rebalance_every=1,
              cost_rate=0.0, dynamics="gbm", mu=0.0, sigma=0.1, heston=None, garch=None, residuals=None,
-             n_paths=100_000, seed=12345, n_threads=0) -> dict:
+             n_paths=100_000, seed=12345, n_threads=0, delta_band=0.0) -> dict:
     """P&L of one short option, per unit of underlying notional, discounted to today.
+
+    The hedge is reviewed every `rebalance_every` steps and traded only when the target delta differs from
+    the position by more than `delta_band` (0: at every review; a positive band is the move-based policy of
+    Whalley and Wilmott, 1997, with a fixed half-width, which saves costs for a given hedging error).
 
     dynamics: "gbm" (mu, sigma), "heston" (mu, heston=(v0, kappa, theta, sigma, rho)) or
     "garch_fhs" (garch=(mu, omega, alpha, gamma, beta, var0) in percent units and the
-    standardised residuals to resample).
+    standardised residuals to resample). One simulation step is T / n_steps years; the GARCH
+    recursion is daily, so with "garch_fhs" n_steps must equal round(252 T) trading days
+    (ValueError otherwise), while the other dynamics scale with the step.
     """
     core = require_cpp()
     return core.hedge_simulation(S0, K, T, r_dom, r_for, option_type, sigma_price, sigma_hedge, n_steps, rebalance_every,
                                  cost_rate, dynamics, mu, sigma, np.asarray(heston if heston is not None else [], float),
                                  np.asarray(garch if garch is not None else [], float),
-                                 np.asarray(residuals if residuals is not None else [], float), n_paths, seed, n_threads)
+                                 np.asarray(residuals if residuals is not None else [], float), n_paths, seed, n_threads,
+                                 delta_band)
 
 
 def pnl_summary(pnl, premium=None, scale=1.0) -> dict:

@@ -16,19 +16,31 @@ def run(**kw):
     return hedging.simulate(**args)
 
 
-def test_unhedged_pnl_is_premium_minus_payoff():
-    out = run(rebalance_every=0, n_paths=1000)
-    expected = out["premium"] - np.exp(-R_DOM * T) * np.maximum(out["final_spot"] - K, 0.0)
+@pytest.mark.parametrize("option_type", ["call", "put"])
+def test_unhedged_pnl_is_premium_minus_payoff(option_type):
+    out = run(rebalance_every=0, n_paths=1000, option_type=option_type)
+    sign = 1.0 if option_type == "call" else -1.0
+    expected = out["premium"] - np.exp(-R_DOM * T) * np.maximum(sign * (out["final_spot"] - K), 0.0)
     np.testing.assert_allclose(out["pnl"], expected, rtol=1e-12, atol=1e-15)
-    assert out["premium"] == pytest.approx(core.bs_price_greeks(S0, K, T, R_DOM, R_FOR, SIGMA, "call")["price"], rel=1e-14)
+    assert out["premium"] == pytest.approx(core.bs_price_greeks(S0, K, T, R_DOM, R_FOR, SIGMA, option_type)["price"], rel=1e-14)
 
 
-def test_daily_hedge_is_unbiased_and_matches_derman_kamal():
-    out = run()
+@pytest.mark.parametrize("option_type", ["call", "put"])
+def test_daily_hedge_is_unbiased_and_matches_derman_kamal(option_type):
+    out = run(option_type=option_type)
     pnl = out["pnl"]
     assert abs(pnl.mean()) < 4 * pnl.std() / np.sqrt(pnl.size)
-    # sqrt(pi/4) vega sigma / sqrt(n) is an asymptotic approximation for near-the-money options.
+    # sqrt(pi/4) vega sigma / sqrt(n) is an asymptotic approximation for near-the-money options (same vega for
+    # the call and the put).
     assert pnl.std() == pytest.approx(hedging.derman_kamal_std(S0, K, T, R_DOM, R_FOR, SIGMA, 126), rel=0.10)
+
+
+def test_hedged_call_and_put_have_the_same_pnl_path_by_path():
+    # Put-call parity: the same paths, and deltas that differ by the constant forward position, so the hedged
+    # P&L of the call and of the put coincide up to rounding.
+    call, put = run(n_paths=2000), run(n_paths=2000, option_type="put")
+    np.testing.assert_allclose(call["pnl"], put["pnl"], rtol=0, atol=1e-10)
+    assert call["premium"] - put["premium"] == pytest.approx(S0 * np.exp(-R_FOR * T) - K * np.exp(-R_DOM * T), abs=1e-14)
 
 
 def test_error_scales_with_square_root_of_rebalancing_interval():
@@ -44,10 +56,26 @@ def test_hedging_at_true_volatility_locks_in_the_premium_difference():
     assert out["pnl"].mean() == pytest.approx(edge, abs=4 * se + 2e-5)
 
 
-def test_transaction_costs_are_accounted_exactly():
-    free, costly = run(n_paths=5000), run(n_paths=5000, cost_rate=0.0002)
+@pytest.mark.parametrize("option_type", ["call", "put"])
+def test_transaction_costs_are_accounted_exactly(option_type):
+    free = run(n_paths=5000, option_type=option_type)
+    costly = run(n_paths=5000, cost_rate=0.0002, option_type=option_type)
     np.testing.assert_allclose(free["pnl"] - costly["pnl"], costly["costs"], rtol=1e-9, atol=1e-14)
     assert costly["costs"].min() > 0
+
+
+def test_garch_fhs_requires_one_step_per_trading_day():
+    # The GARCH recursion is daily and does not scale with the step: half a year is 126 trading days. With 63
+    # or 252 steps the simulated volatility would be wrong by a factor sqrt(2), so the call is rejected.
+    z = np.random.default_rng(2).standard_normal(500)
+    kw = dict(dynamics="garch_fhs", garch=(0.0, 0.01, 0.05, 0.0, 0.9, 0.2), residuals=z, n_paths=100)
+    for n_steps in (63, 252):
+        with pytest.raises(ValueError):
+            run(n_steps=n_steps, **kw)
+    assert run(n_steps=126, **kw)["pnl"].size == 100
+    assert run(n_steps=63, T=0.25, **kw)["pnl"].size == 100
+    for n_steps in (63, 252):   # the other dynamics scale with the step
+        assert run(n_steps=n_steps, n_paths=100)["pnl"].size == 100
 
 
 def test_garch_fhs_constant_variance_limit():
@@ -67,3 +95,23 @@ def test_reproducible_across_threads(dynamics):
               residuals=z, n_paths=3000)
     a, b = run(n_threads=1, **kw), run(n_threads=4, **kw)
     np.testing.assert_array_equal(a["pnl"], b["pnl"])
+
+
+def test_delta_band_trades_less_and_sits_between_the_time_based_and_static_hedges():
+    kw = dict(n_paths=4000, cost_rate=0.0002)
+    daily = run(**kw)
+    np.testing.assert_array_equal(run(delta_band=0.0, **kw)["pnl"], daily["pnl"])   # a zero band is the daily policy
+    static = run(delta_band=10.0, **kw)                                              # never traded after inception
+    delta0 = core.bs_price_greeks(S0, K, T, R_DOM, R_FOR, SIGMA, "call")["delta"]
+    expected = 0.0002 * delta0 * S0 + 0.0002 * delta0 * np.exp(R_FOR * T) * static["final_spot"] * np.exp(-R_DOM * T)
+    np.testing.assert_allclose(static["costs"], expected, rtol=1e-12)
+    banded = run(delta_band=0.05, **kw)
+    assert static["costs"].mean() < banded["costs"].mean() < daily["costs"].mean()
+    assert daily["pnl"].std() < banded["pnl"].std() < static["pnl"].std()
+    # Move-based hedging dominates time-based hedging (Whalley and Wilmott, 1997): on this contract a daily
+    # review with a 0.10 band costs less than weekly rebalancing and leaves a smaller hedging error (both
+    # margins are well outside Monte Carlo noise: costs 0.59e-3 against 0.61e-3, dispersion 3.5e-3 against 4.0e-3).
+    weekly, wide = run(rebalance_every=5, **kw), run(delta_band=0.10, **kw)
+    assert wide["costs"].mean() < weekly["costs"].mean() and wide["pnl"].std() < weekly["pnl"].std()
+    with pytest.raises(ValueError):
+        run(delta_band=-0.01, n_paths=10)

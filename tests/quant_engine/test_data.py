@@ -21,6 +21,22 @@ YC.B.U2.EUR.4F.G_N_A.SV_C_YM.TAU2,B,U2,EUR,4F,G_N_A,SV_C_YM,TAU2,2024-01-02,9.5
 """
 
 
+FRED_SAMPLE = """DATE,DTB3
+2024-01-03,5.24
+2024-01-01,.
+2024-01-02,5.25
+2024-01-04,
+"""
+
+
+def test_parse_fred_csv_handles_missing_values_and_order():
+    series = data.parse_fred_csv(FRED_SAMPLE)
+    assert series.name == "DTB3" and series.index.name == "date"
+    assert list(series.index.strftime("%Y-%m-%d")) == ["2024-01-02", "2024-01-03"]   # '.' and blank dropped, sorted
+    np.testing.assert_allclose(series.to_numpy(), [5.25, 5.24])
+    assert series.dtype == float
+
+
 def test_parse_fx_file():
     frame = data.parse_ecb_fx_csv(FX_SAMPLE)
     assert list(frame.columns) == ["USD", "JPY", "BGN", "GBP", "CHF"]
