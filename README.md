@@ -67,15 +67,27 @@ Each notebook states its assumptions, fixes its random seeds, validates the numb
 
 ## Architecture
 
-```text
-notebooks/  ──►  quant_engine (Python)                  ──►  quant_engine._core (C++17, pybind11)
-                 data loaders (ECB, FRED)                     Black-Scholes, implied volatility
-                 NumPy/SciPy reference implementations        Crank-Nicolson + PSOR (American options)
-                 calibration, backtests, capital              Heston Fourier + QE Monte Carlo
-                 yield-curve PCA, Nelson-Siegel, forecasts    GJR-GARCH MLE, rolling VaR/ES (parallel)
-                 IRRBB: EVE/NII, EBA tests, hedge LP          discrete delta-hedging simulator
-                 reporting                                    dynamic Nelson-Siegel Kalman filter
+Research notebooks call the Python package. Computationally intensive methods are implemented in C++17 and exposed through pybind11.
+
+```mermaid
+flowchart TD
+    N[Research notebooks] --> P[Python package]
+    P --> C[C++17 numerical core]
+    P --> R[Research outputs]
+    T[Tests] -.-> P
+    T -.-> C
 ```
+
+| Component | Source | Responsibility |
+| --- | --- | --- |
+| Data and curves | [`data.py`](scripts/quant_engine/quant_engine/data.py), [`curves.py`](scripts/quant_engine/quant_engine/curves.py), [`term_structure.py`](scripts/quant_engine/quant_engine/term_structure.py) | Market data, discount curves and yield-curve estimation. |
+| Derivatives | [`black_scholes.py`](scripts/quant_engine/quant_engine/black_scholes.py), [`heston.py`](scripts/quant_engine/quant_engine/heston.py), [`hedging.py`](scripts/quant_engine/quant_engine/hedging.py) | Option valuation and hedge simulation. |
+| Financial risk | [`garch.py`](scripts/quant_engine/quant_engine/garch.py), [`risk.py`](scripts/quant_engine/quant_engine/risk.py), [`banking_book.py`](scripts/quant_engine/quant_engine/banking_book.py) | Volatility, market risk and banking-book interest-rate risk. |
+| Numerical core | [C++ source](scripts/quant_engine/cpp/) | Numerical kernels and native bindings. |
+| Visualisation | [`figstyle.py`](scripts/quant_engine/quant_engine/figstyle.py), [`readme_figures.py`](scripts/quant_engine/quant_engine/readme_figures.py) | Figure styling and reproducible research outputs. |
+| Validation suite | [Python tests](tests/quant_engine/), [C++ tests](scripts/quant_engine/cpp/tests/) | Numerical and implementation checks. |
+
+Implementation and installation details: [package documentation](scripts/quant_engine/README.md).
 
 ## Getting started
 

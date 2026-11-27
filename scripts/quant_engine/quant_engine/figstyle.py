@@ -1,12 +1,4 @@
-"""Chart style for the README figures, with a light and a dark variant of every figure.
-
-The categorical colours follow a fixed order (blue, orange, aqua, yellow, magenta)
-whose adjacent pairs were checked for colour-vision-deficiency separation on both
-surfaces; the dark variant uses steps chosen for the dark surface rather than an
-automatic inversion. Lines are 2 px, gridlines are solid hairlines, text is set
-in neutral inks and never in the series colour, and series are identified by a
-legend plus selective direct labels.
-"""
+"""Shared chart conventions for README figures and research notebooks."""
 
 from __future__ import annotations
 
@@ -30,7 +22,22 @@ THEMES = {
     },
 }
 
-WIDTH, DPI = 10.0, 150
+# Research publication style, revision 1.
+# Retain the five categorical positions and the actuarial ordinal palette.
+THEMES["light"].update({
+    "surface": "#ffffff", "ink": "#162738", "ink2": "#445566", "muted": "#566574",
+    "grid": "#dce2e7", "axis": "#778594", "neutral": "#e8edf1",
+    "series": ["#24547a", "#b05a2a", "#18756b", "#947019", "#80518b"],
+    "negative": "#ad3838", "band": (0.12, 0.23),
+})
+THEMES["dark"].update({
+    "surface": "#111c27", "ink": "#edf2f7", "ink2": "#c7d2de", "muted": "#a9b8c6",
+    "grid": "#304050", "axis": "#8292a3", "neutral": "#304050",
+    "series": ["#84b8e4", "#eea46e", "#6bc6b5", "#e4c36e", "#d5a5df"],
+    "negative": "#f18a86", "band": (0.20, 0.35),
+})
+
+WIDTH, DPI = 10.0, 240
 # A neo-grotesque sans stack: the first family installed is used (Liberation Sans and FreeSans are metric clones of
 # Arial and Helvetica available on most Linux systems); DejaVu Sans, bundled with matplotlib, is the last resort.
 SANS = ["Inter", "Helvetica Neue", "Helvetica", "Arial", "Liberation Sans", "FreeSans", "DejaVu Sans"]
@@ -39,16 +46,16 @@ SANS = ["Inter", "Helvetica Neue", "Helvetica", "Arial", "Liberation Sans", "Fre
 def rc(t: dict) -> dict:
     return {
         "figure.facecolor": t["surface"], "axes.facecolor": t["surface"], "savefig.facecolor": t["surface"],
-        "font.family": "sans-serif", "font.sans-serif": SANS, "font.size": 10,
+        "font.family": "sans-serif", "font.sans-serif": SANS, "font.size": 10.5,
         "text.color": t["ink"], "axes.labelcolor": t["ink2"], "xtick.color": t["muted"], "ytick.color": t["muted"],
         "xtick.labelcolor": t["ink2"], "ytick.labelcolor": t["ink2"],
         "axes.edgecolor": t["axis"], "axes.linewidth": 0.8, "axes.grid": True, "axes.grid.axis": "y",
-        "grid.color": t["grid"], "grid.linewidth": 0.8, "grid.linestyle": "-",
+        "grid.color": t["grid"], "grid.linewidth": 0.65, "grid.linestyle": "-",
         "axes.spines.top": False, "axes.spines.right": False, "axes.spines.left": False,
         "xtick.major.size": 0, "ytick.major.size": 0, "xtick.minor.size": 0, "ytick.minor.size": 0,
         "xtick.major.pad": 6, "ytick.major.pad": 6, "axes.axisbelow": True,
-        "lines.linewidth": 2.0, "lines.solid_capstyle": "round", "lines.solid_joinstyle": "round",
-        "legend.frameon": False, "legend.fontsize": 9, "legend.labelcolor": t["ink2"],
+        "lines.linewidth": 1.8, "lines.solid_capstyle": "round", "lines.solid_joinstyle": "round",
+        "legend.frameon": False, "legend.fontsize": 9.5, "legend.labelcolor": t["ink2"],
         "axes.prop_cycle": plt.cycler(color=t["series"]),
     }
 
@@ -60,11 +67,12 @@ def new_figure(t: dict, height=4.6, ncols=1, sharey=False, width=WIDTH):
 
 
 def header(fig, t: dict, title: str, subtitle: str | None = None, source: str | None = None):
-    fig.text(0.07, 0.945, title, fontsize=13, weight="bold", color=t["ink"], ha="left", va="top")
+    """Set a figure heading, measurement context and source in editorial order."""
+    fig.text(0.07, 0.955, title, fontsize=15, weight="semibold", color=t["ink"], ha="left", va="top")
     if subtitle:
-        fig.text(0.07, 0.885, subtitle, fontsize=10, color=t["ink2"], ha="left", va="top")
+        fig.text(0.07, 0.887, subtitle, fontsize=10, color=t["ink2"], ha="left", va="top")
     if source:
-        fig.text(0.07, 0.025, source, fontsize=8, color=t["muted"], ha="left", va="bottom")
+        fig.text(0.07, 0.025, source, fontsize=8.5, color=t["muted"], ha="left", va="bottom")
 
 
 def end_label(ax, t: dict, x, y, text: str, color: str, dy: float = 0.0, dx: float = 6.0):
@@ -85,18 +93,61 @@ def band(ax, x, lo, hi, color: str, alpha: float):
 
 
 def render(builder, name: str, out: Path, *args, **kwargs) -> list[Path]:
-    """Draw `builder(t, *args)` in both themes and save <name>-light.png and <name>-dark.png."""
+    """Save the existing light/dark PNG pair; optionally export SVG and wider PNGs.
+
+    RESEARCH_CHART_WIDTH_PX specifies raster width (default 2400).
+    RESEARCH_CHART_SVG=1 enables vector export without changing the return value.
+    """
+    import os
+
+    width_px = int(os.environ.get("RESEARCH_CHART_WIDTH_PX", "2400"))
+    if not 800 <= width_px <= 7680:
+        raise ValueError("RESEARCH_CHART_WIDTH_PX must be between 800 and 7680")
+    vector = os.environ.get("RESEARCH_CHART_SVG", "0") == "1"
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     paths = []
     for mode, t in THEMES.items():
         with plt.rc_context(rc(t)):
             fig = builder(t, *args, **kwargs)
-            path = out / f"{name}-{mode}.png"
-            fig.savefig(path, dpi=DPI, facecolor=t["surface"])
-            plt.close(fig)
-            paths.append(path)
+            try:
+                _fit_figure_text(fig)
+                path = out / f"{name}-{mode}.png"
+                fig.savefig(path, dpi=width_px / fig.get_figwidth(), facecolor=t["surface"])
+                paths.append(path)
+                if vector:
+                    fig.savefig(path.with_suffix(".svg"), facecolor=t["surface"])
+            finally:
+                plt.close(fig)
     return paths
+
+
+def _fit_figure_text(fig):
+    """Fit figure-level headings and notes to the canvas without moving data axes.
+
+    Long lines are reduced only as necessary. Report text that cannot fit at
+    the minimum size rather than silently clipping it.
+    """
+    import warnings
+
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    for artist in fig.texts:
+        if not artist.get_visible() or not artist.get_text():
+            continue
+        minimum = min(7.5, artist.get_fontsize())
+        bounds = artist.get_window_extent(renderer)
+        available = max(1.0, fig.bbox.x1 - bounds.x0 - 0.025 * fig.bbox.width)
+        if bounds.width > available and artist.get_ha() == "left":
+            artist.set_fontsize(max(minimum, artist.get_fontsize() * available / bounds.width))
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    for artist in fig.texts:
+        if not artist.get_visible() or not artist.get_text():
+            continue
+        bounds = artist.get_window_extent(renderer)
+        if (bounds.x0 < -1 or bounds.y0 < -1 or bounds.x1 > fig.bbox.x1 + 1 or bounds.y1 > fig.bbox.y1 + 1):
+            warnings.warn("Figure text exceeds canvas: " + artist.get_text()[:100], RuntimeWarning, stacklevel=2)
 
 
 def percent_axis(ax, axis="y", decimals=0):
@@ -130,7 +181,7 @@ def label_offsets(ax, values, min_gap=13.0) -> list[float]:
 # --------------------------------------------------------------------------- notebooks
 
 NOTEBOOK = THEMES["light"]
-SERIES = NOTEBOOK["series"]            # categorical order: blue, orange, aqua, yellow, magenta (never cycled)
+SERIES = NOTEBOOK["series"]            # categorical order; use distinct markers or line styles where needed
 NEGATIVE = NOTEBOOK["negative"]        # losses, breaches and thresholds
 MUTED = NOTEBOOK["muted"]              # context series drawn behind the ones that matter
 ORDINAL = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"]   # one hue, light to dark (validated, --ordinal)
@@ -139,7 +190,7 @@ ORDINAL = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"]   # one hue, l
 def notebook_style(dpi: int = 110) -> None:
     """Matplotlib defaults for the notebooks, matching the README charts.
 
-    - validated categorical order, never cycled;
+    - fixed categorical order, never cycled;
     - neo-grotesque sans type with a clear hierarchy: a bold headline (see `headline`), a lighter subtitle, panel
       titles and axis text in secondary ink;
     - solid hairline grid behind the marks, no top, right or left spine, no tick marks;
@@ -154,10 +205,10 @@ def notebook_style(dpi: int = 110) -> None:
     params.update({
         "figure.dpi": dpi, "figure.constrained_layout.use": True,
         "figure.constrained_layout.h_pad": 0.06, "figure.constrained_layout.w_pad": 0.06,
-        "figure.titlesize": 13, "figure.titleweight": "bold",
+        "figure.titlesize": 13, "figure.titleweight": "semibold",
         "axes.titlesize": 10.5, "axes.titlelocation": "left", "axes.titlepad": 8, "axes.titlecolor": NOTEBOOK["ink2"],
-        "axes.labelsize": 9, "xtick.labelsize": 8.5, "ytick.labelsize": 8.5,
-        "legend.fontsize": 8.5, "legend.handlelength": 1.4, "legend.columnspacing": 1.6,
+        "axes.labelsize": 10, "xtick.labelsize": 9, "ytick.labelsize": 9,
+        "legend.fontsize": 9, "legend.handlelength": 1.4, "legend.columnspacing": 1.6,
         "lines.linewidth": 1.5, "patch.force_edgecolor": True, "patch.edgecolor": NOTEBOOK["surface"],
         "patch.linewidth": 1.0,
     })
@@ -174,12 +225,12 @@ def headline(ax, title: str, subtitle: str | None = None) -> None:
         ax.annotate(subtitle, (0, 1), xycoords="axes fraction", xytext=(0, 7), textcoords="offset points",
                     ha="left", va="bottom", fontsize=9.5, color=NOTEBOOK["ink2"], annotation_clip=False)
         pad = 7 + 9.5 * 1.3 + 6
-    ax.set_title(title, loc="left", fontsize=12.5, fontweight="bold", color=NOTEBOOK["ink"], pad=pad)
+    ax.set_title(title, loc="left", fontsize=13, fontweight="semibold", color=NOTEBOOK["ink"], pad=pad)
 
 
 def figure_headline(fig, title: str) -> None:
     """Bold takeaway title over a multi-panel figure; the panel titles say what each panel shows."""
-    fig.suptitle(title, x=0.01, ha="left", fontsize=13, fontweight="bold", color=NOTEBOOK["ink"])
+    fig.suptitle(title, x=0.01, ha="left", fontsize=14, fontweight="semibold", color=NOTEBOOK["ink"])
 
 
 def label_ends(ax, series: dict, colors: dict, fmt=None, min_gap: float = 12.0) -> None:
