@@ -166,7 +166,7 @@ def hedging_frontier(t, d):
     ax.set(xlabel="standard deviation of the hedged P&L, EUR thousand", ylabel="expected transaction costs, EUR thousand")
     ax.set_xlim(f["std"].min() * 0.9, f["std"].max() * 1.12)
     ax.set_ylim(0, f["cost"].max() * 1.2)
-    header(fig, t, "Hedging less often saves costs but multiplies the risk",
+    header(fig, t, "Transaction costs and hedging risk by rebalancing frequency",
            "Cost and risk of the delta hedge by rebalancing frequency (GARCH dynamics with historical shocks, same random paths)",
            d["source"])
     fig.texts[-1].set_y(0.015)
@@ -246,7 +246,7 @@ def irrbb_hedging(t, d):
     ax.legend(loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.02), fontsize=8.5)
     ax.set_ylim(min(table.to_numpy().min() * 1.1, -60), table.to_numpy().max() * 1.35)
     robust = table.columns[-1]
-    header(fig, t, "A hedge fitted only to the six supervisory scenarios fails on history",
+    header(fig, t, "Interest rate risk under supervisory and historical scenarios",
            f"Stylised euro area bank, curve of {d['base_date']:%d %B %Y}: change in economic value of equity by BCBS scenario\n"
            "and in the worst historical 12-month move of the curve since 2004",
            d["source"] + f"; swap hedges from minimax linear programmes (robust hedge: worst loss {-table[robust].min():.1f}% of Tier 1)")
