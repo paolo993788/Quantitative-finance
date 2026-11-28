@@ -183,7 +183,7 @@ def var_exceptions(t, d):
         ax.bar(x + (k - 0.5) * (width + 0.04), ex[col].to_numpy(), width, color=t["series"][k], label=col)
     for level, label in ((5, "yellow zone from 5"), (10, "red zone from 10")):
         ax.axhline(level, color=t["axis"], lw=1)
-        ax.annotate(label, (x[-1] + 0.6, level), xytext=(4, 0), textcoords="offset points", va="center", fontsize=8,
+        ax.annotate(label, (x[-1] + 0.6, level), xytext=(4, 4), textcoords="offset points", va="bottom", fontsize=8,
                     color=t["ink2"], annotation_clip=False)
     worst = ex.iloc[:, 0].idxmax()
     ax.annotate(f"{worst}: {int(ex.loc[worst].iloc[0])} exceptions for historical simulation", (list(ex.index).index(worst) - 0.2, ex.loc[worst].iloc[0]),
@@ -243,7 +243,7 @@ def irrbb_hedging(t, d):
     ax.axvline(x[-1] - 0.75, color=t["grid"], lw=1)
     ax.set_xticks(x, [g.replace("short rates", "short") for g in groups])
     ax.set_ylabel("change in EVE, % of Tier 1")
-    ax.legend(loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.02), fontsize=8.5)
+    ax.legend(loc="upper center", ncol=2, bbox_to_anchor=(0.45, 1.02), fontsize=8.5)
     ax.set_ylim(min(table.to_numpy().min() * 1.1, -60), table.to_numpy().max() * 1.35)
     robust = table.columns[-1]
     header(fig, t, "Interest rate risk under supervisory and historical scenarios",

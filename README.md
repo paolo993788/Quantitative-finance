@@ -1,13 +1,6 @@
 # Quantitative Finance
 
 [![CI](https://github.com/paolo993788/Quantitative-finance/actions/workflows/ci.yml/badge.svg)](https://github.com/paolo993788/Quantitative-finance/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![C++](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)
-![R](https://img.shields.io/badge/R-4.2%2B-276DC3?logo=r&logoColor=white)
-![pybind11](https://img.shields.io/badge/bindings-pybind11-5C6BC0)
-![Tests](https://img.shields.io/badge/tests-pytest-0A9EDC?logo=pytest&logoColor=white)
-![Data](https://img.shields.io/badge/data-ECB%20%7C%20FRED-2E7D32)
-![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 **Derivatives pricing, hedging, market-risk and interest-rate-risk analytics with a C++17 engine driven from Python notebooks, validated against published benchmarks and applied to official European Central Bank data.**
 
@@ -21,9 +14,11 @@ The repository answers questions that a derivatives desk, a market-risk function
 | Market risk and capital | One-day 99% VaR and 97.5% ES of a currency book on ECB reference rates, 1999-2025, with regulatory backtests and FRTB capital | Filtered historical simulation passes every test (1.12% exceptions, Z2 about 0); historical simulation fails (red zone in 2008); FRTB charge about 9% of the book versus 22% under Basel 2.5, stressed period April 2008 - March 2009 |
 | Yield curve and IRRBB (case study) | ECB AAA curve 2004-2025: PCA, dynamic Nelson-Siegel by two-step OLS and by Kalman-filter maximum likelihood in C++, recursive forecasts with Diebold-Mariano tests; EVE and NII of a stylised bank under the six BCBS scenarios with the EBA floor and outlier tests; minimax swap hedges by linear programming | No model beats the random walk over 2015-2025 (it wins in the negative-rate years, loses mildly in 2022-2025); the unhedged bank loses 46% of Tier 1 in the parallel-up scenario (limit 15%); a hedge fitted to the six scenarios alone fails on history (18.5% loss in the worst year), while one fitted to scenarios and history keeps the worst loss at 5.8% with two swaps |
 | Option pricing engines | Black-Scholes, Crank-Nicolson with PSOR for American options, Heston by Fourier inversion and QE Monte Carlo, calibration | Heston price matches the Fang-Oosterlee (2008) benchmark to 2e-8; second-order convergence of Crank-Nicolson; C++ Monte Carlo about 7x faster than vectorised NumPy |
-| Engineering | pybind11 extension, parallel and thread-independent random streams, NumPy reference implementations | 83 Python tests with justified tolerances; 1,180 C++ checks built with warnings as errors and run under AddressSanitizer, UndefinedBehaviorSanitizer and ThreadSanitizer; results identical for any number of threads; CI on every pull request, including an offline run of every notebook; pinned lock file; the C++ Kalman filter is about 100 times faster than NumPy |
+| Engineering | pybind11 extension, parallel and thread-independent random streams, NumPy reference implementations | Python tests with justified tolerances; 1,180 C++ checks built with warnings as errors and run under AddressSanitizer, UndefinedBehaviorSanitizer and ThreadSanitizer; results identical for any number of threads; CI on every pull request, including an offline run of every Python notebook; pinned lock file; the C++ Kalman filter is about 100 times faster than NumPy |
 
 ## Charts
+
+The FX pricing and hedging results are simulations calibrated to market inputs. The VaR and yield-curve exercises use historical observations. The banking-book scenarios use a stylised balance sheet.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/hedging_pnl-dark.png">
@@ -51,6 +46,8 @@ The repository answers questions that a derivatives desk, a market-risk function
 </picture>
 
 The charts are drawn by `python -m quant_engine.readme_figures` with the same data, models and seeds as the notebooks (light and dark variants in `docs/figures/`).
+
+[Figure generation and provenance](docs/figure-style.md#reproducing-the-figures)
 
 ## Catalogue
 
@@ -134,7 +131,7 @@ Arbitrage-free Nelson-Siegel and shadow-rate term-structure models; behavioural 
 
 ## Development workflow
 
-Changes follow the [publishing workflow](docs/publishing.md). Every pull request runs the [CI workflow](.github/workflows/ci.yml): lint, the Python tests on Python 3.10-3.12, the C++ tests with GCC and Clang and under sanitizers, and every notebook offline on synthetic data. The [`CLAUDE.md`](CLAUDE.md) file provides project instructions for [Claude Code](https://claude.com/claude-code), so that AI-assisted contributions meet the same standards.
+Changes follow the [publishing workflow](docs/publishing.md). Every pull request runs the [CI workflow](.github/workflows/ci.yml): lint, the Python tests on Python 3.10-3.12, the C++ tests with GCC and Clang and under sanitizers, and every Python notebook offline on synthetic data. The [`CLAUDE.md`](CLAUDE.md) file provides project instructions for [Claude Code](https://claude.com/claude-code), so that AI-assisted contributions meet the same standards.
 
 ## Disclaimer
 

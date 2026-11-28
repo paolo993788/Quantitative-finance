@@ -38,9 +38,8 @@ THEMES["dark"].update({
 })
 
 WIDTH, DPI = 10.0, 240
-# A neo-grotesque sans stack: the first family installed is used (Liberation Sans and FreeSans are metric clones of
-# Arial and Helvetica available on most Linux systems); DejaVu Sans, bundled with matplotlib, is the last resort.
-SANS = ["Inter", "Helvetica Neue", "Helvetica", "Arial", "Liberation Sans", "FreeSans", "DejaVu Sans"]
+# Matplotlib bundles both the regular and bold faces.
+SANS = ["DejaVu Sans"]
 
 
 def rc(t: dict) -> dict:
@@ -68,7 +67,7 @@ def new_figure(t: dict, height=4.6, ncols=1, sharey=False, width=WIDTH):
 
 def header(fig, t: dict, title: str, subtitle: str | None = None, source: str | None = None):
     """Set a figure heading, measurement context and source in editorial order."""
-    fig.text(0.07, 0.955, title, fontsize=15, weight="semibold", color=t["ink"], ha="left", va="top")
+    fig.text(0.07, 0.955, title, fontsize=15, weight="bold", color=t["ink"], ha="left", va="top")
     if subtitle:
         fig.text(0.07, 0.887, subtitle, fontsize=10, color=t["ink2"], ha="left", va="top")
     if source:
@@ -205,7 +204,7 @@ def notebook_style(dpi: int = 110) -> None:
     params.update({
         "figure.dpi": dpi, "figure.constrained_layout.use": True,
         "figure.constrained_layout.h_pad": 0.06, "figure.constrained_layout.w_pad": 0.06,
-        "figure.titlesize": 13, "figure.titleweight": "semibold",
+        "figure.titlesize": 13, "figure.titleweight": "bold",
         "axes.titlesize": 10.5, "axes.titlelocation": "left", "axes.titlepad": 8, "axes.titlecolor": NOTEBOOK["ink2"],
         "axes.labelsize": 10, "xtick.labelsize": 9, "ytick.labelsize": 9,
         "legend.fontsize": 9, "legend.handlelength": 1.4, "legend.columnspacing": 1.6,
@@ -225,12 +224,12 @@ def headline(ax, title: str, subtitle: str | None = None) -> None:
         ax.annotate(subtitle, (0, 1), xycoords="axes fraction", xytext=(0, 7), textcoords="offset points",
                     ha="left", va="bottom", fontsize=9.5, color=NOTEBOOK["ink2"], annotation_clip=False)
         pad = 7 + 9.5 * 1.3 + 6
-    ax.set_title(title, loc="left", fontsize=13, fontweight="semibold", color=NOTEBOOK["ink"], pad=pad)
+    ax.set_title(title, loc="left", fontsize=13, fontweight="bold", color=NOTEBOOK["ink"], pad=pad)
 
 
 def figure_headline(fig, title: str) -> None:
     """Bold takeaway title over a multi-panel figure; the panel titles say what each panel shows."""
-    fig.suptitle(title, x=0.01, ha="left", fontsize=14, fontweight="semibold", color=NOTEBOOK["ink"])
+    fig.suptitle(title, x=0.01, ha="left", fontsize=14, fontweight="bold", color=NOTEBOOK["ink"])
 
 
 def label_ends(ax, series: dict, colors: dict, fmt=None, min_gap: float = 12.0) -> None:
