@@ -26,6 +26,27 @@ def test_textbook_value():
     assert core.bs_price_greeks(100, 100, 1, 0.05, 0, 0.2, "call")["price"] == pytest.approx(10.4506, abs=5e-5)
 
 
+@pytest.mark.parametrize("kind, sign", [("call", 1.0), ("put", -1.0)])
+def test_reference_price_at_expiry_and_zero_volatility(kind, sign):
+    strikes = np.array([95.0, 100.0, 105.0, 95.0, 100.0, 105.0, 100.0])
+    maturities = np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0])
+    rates = np.array([0.05, 0.05, 0.05, 0.05, 0.02, 0.01, 0.05])
+    volatilities = np.array([0.2, 0.2, 0.2, 0.0, 0.0, 0.0, 0.2])
+    yield_rate = 0.02
+    intrinsic = 100.0 * np.exp(-yield_rate * maturities[:-1]) - strikes[:-1] * np.exp(-rates[:-1] * maturities[:-1])
+    cpp_prices = [core.bs_price_greeks(100.0, k, t, r, yield_rate, v, kind)["price"]
+                  for k, t, r, v in zip(strikes, maturities, rates, volatilities)]
+
+    with np.errstate(divide="raise", invalid="raise"):
+        vector = ref.bs_price(100.0, strikes, maturities, rates, yield_rate, volatilities, kind)
+        scalar = ref.bs_price(100.0, 100.0, 0.0, 0.05, yield_rate, 0.2, kind)
+
+    assert np.isscalar(scalar)
+    assert scalar == 0.0
+    np.testing.assert_allclose(vector[:-1], np.maximum(sign * intrinsic, 0.0), rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(vector, cpp_prices, rtol=1e-12, atol=1e-12)
+
+
 @pytest.mark.parametrize("S,K,T,r,q,sigma", CASES)
 def test_put_call_parity(S, K, T, r, q, sigma):
     call = core.bs_price_greeks(S, K, T, r, q, sigma, "call")["price"]

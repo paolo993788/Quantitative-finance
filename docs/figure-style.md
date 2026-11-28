@@ -30,3 +30,16 @@ For validation, run the generator with `--synthetic --out` pointing to a tempora
 - Financial Times Visual Journalism Team, [Visual Vocabulary](https://github.com/Financial-Times/chart-doctor/tree/main/visual-vocabulary).
 
 These references inform editorial conventions; the palette and implementation are independent.
+
+## Reproducing the figures
+
+The published PNGs use the regular and bold DejaVu Sans faces bundled with Matplotlib. The generator writes a light and a dark PNG for each chart, both 2,400 pixels wide by default. The README selects the theme using the reader’s colour preference.
+
+Run these commands from the repository root after installing the locked dependencies. The first command regenerates the publication variant using the available official inputs. The second creates a private preview from simulated inputs.
+
+```bash
+python -m quant_engine.readme_figures
+python -m quant_engine.readme_figures --synthetic --out outputs/figures-synthetic
+```
+
+Set `RESEARCH_CHART_WIDTH_PX=3840` for a 4K raster export or `RESEARCH_CHART_SVG=1` to write SVGs as well. Use `--out` to keep these optional exports outside `docs/figures`. Live source data can be revised. The archived-input fingerprints in [`figures/source-sha256.txt`](figures/source-sha256.txt) identify the input files used for this rendering.
