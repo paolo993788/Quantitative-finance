@@ -18,14 +18,27 @@ def _d1_d2(S, K, T, r, q, sigma):
 
 
 def bs_price(S, K, T, r, q, sigma, option_type="call"):
-    """European option price under Black-Scholes-Merton (vectorised)."""
+    """Vectorised European option price, including expiry and deterministic payoffs."""
+    if option_type not in ("call", "put"):
+        raise ValueError("option_type must be 'call' or 'put'")
     S, K, T, r, q, sigma = np.broadcast_arrays(*map(np.asarray, (S, K, T, r, q, sigma)))
+    discounted_spot = S * np.exp(-q * T)
+    discounted_strike = K * np.exp(-r * T)
+    deterministic = (T == 0.0) | (sigma == 0.0)
+    has_deterministic_payoff = np.any(deterministic)
+    if has_deterministic_payoff:
+        # Use finite placeholders where the price comes from the known payoff.
+        T = np.where(deterministic, 1.0, T)
+        sigma = np.where(deterministic, 1.0, sigma)
     d1, d2 = _d1_d2(S, K, T, r, q, sigma)
     if option_type == "call":
-        return S * np.exp(-q * T) * stats.norm.cdf(d1) - K * np.exp(-r * T) * stats.norm.cdf(d2)
-    if option_type == "put":
-        return K * np.exp(-r * T) * stats.norm.cdf(-d2) - S * np.exp(-q * T) * stats.norm.cdf(-d1)
-    raise ValueError("option_type must be 'call' or 'put'")
+        price = discounted_spot * stats.norm.cdf(d1) - discounted_strike * stats.norm.cdf(d2)
+    else:
+        price = discounted_strike * stats.norm.cdf(-d2) - discounted_spot * stats.norm.cdf(-d1)
+    if has_deterministic_payoff:
+        intrinsic = (discounted_spot - discounted_strike) * (1.0 if option_type == "call" else -1.0)
+        return np.where(deterministic, np.maximum(intrinsic, 0.0), price)[()]
+    return price
 
 
 def bs_greeks(S, K, T, r, q, sigma, option_type="call"):
