@@ -19,6 +19,7 @@ jobs:
   python:
     name: Python ${{ matrix.python }} (${{ matrix.deps }} dependencies)
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -53,6 +54,7 @@ jobs:
   cpp:
     name: C++ ${{ matrix.name }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +91,7 @@ jobs:
   notebooks:
     name: Notebooks (synthetic data, offline)
     runs-on: ubuntu-24.04
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
